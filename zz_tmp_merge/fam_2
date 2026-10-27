@@ -1,0 +1,159 @@
+son() || ""; if (json === lastShowcase) return; lastShowcase = json;
+  try { const cur = B.getShowcase ? await B.getShowcase(USER.uid, activeKid) : null; await B.setShowcase(USER.uid, activeKid, { name: kidName() ?? "", json, visible: cur?.visible }); } catch { /* table not there yet */ }
+}
+/** hide the child's showcase (parent flips the switch off, or deletes the profile) */
+export async function hideShowcase(): Promise<void> { lastShowcase = ""; if (!B.setShowcase || !USER || !activeKid) return; try { await B.setShowcase(USER.uid, activeKid, { visible: false }); } catch { /* offline */ } }
+async function refreshShowcaseVisibility(): Promise<void> {
+  if (!B.setShowcase || !USER || !activeKid) return; lastShowcase = showcaseJson() || "";
+  try { const cur = await B.getShowcase!(USER.uid, activeKid); const mine = lastShowcase !== ""; if (!cur) { if (mine) await B.setShowcase(USER.uid, activeKid, { name: kidName() ?? "", json: lastShowcase, visible: true }); }
+    else if (cur.visible && !mine) await B.setShowcase(USER.uid, activeKid, { visible: false }); } catch { /* table not there yet */ }
+}
+
+function setSyncMsg(m: string) { syncMsg = m; buttonRefresh(); }
+/** push local progress up; pull anything newer down; then update the badge */
+async function syncNow(reason: string) {
+  if (!USER || !activeKid || !isOnline() || pushing) return; pushing = true; setSyncMsg("syncing...");
+  try {
+    for (const k of SYNC) {
+      const [cloud, local] = await Promise.all([B.getData(USER.uid, activeKid, sdoc(k)).catch(() => null), Promise.resolve(readKey(k))]);
+      const stamp = Number((local && JSON.parse(local).at) || 0), cloudAt = cloud?.at ?? 0, mine = local == null ? "" : JSON.stringify(local);
+      if (local != null && stamp >= cloudAt && lastPushed[k] !== mine) { await B.setData(USER.uid, activeKid, sdoc(k), local, stamp); lastPushed[k] = mine; }
+      else if (cloud && cloudAt > stamp) { writeKey(k, cloud.json); if (k === "unify.social.v1") window.dispatchEvent(new Event("unify:social")); }
+    }
+    // last write wins for keys with no timestamp (avatar changes etc.)
+    for (const k of SYNC) if (["unify.social.v1", "unify.dorm.v1"].includes(k) && readKey(k) != null) { const local = readKey(k)!, mine = JSON.stringify(local); if (lastPushed[k] !== mine) { await B.setData(USER.uid, activeKid, sdoc(k), local, Date.now()); lastPushed[k] = mine; } }
+    await publishShowcase();
+    if (reason !== "init") setSyncMsg("saved " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    else setSyncMsg("");
+  } catch { setSyncMsg("offline"); } finally { pushing = false; buttonRefresh(); }
+}
+const isOnline = () => !!B;
+
+/** guest -> family or kid -> kid: move progress around without losing photos */
+async function loadKid(k: KidDoc) {
+  const l = lget(); if (l.mode === "family" && l.kid === k.id) return;
+  if (l.mode === "family" && l.kid && l.kid !== k.id) { clearLocal(l.kid); }
+  else if (l.mode !== "family") { try { localStorage.setItem(GUEST_BACKUP, JSON.stringify(snapshot())); } catch { /* too big */ } }
+  lastPushed = {}; lastShowcase = ""; activeKid = k.id; lset({ mode: "family", kid: k.id, kidName: k.name });
+  if (isOnline() && USER) {
+    let newest = 0, remote: Record<string, { json: string; at: number }> = {};
+    for (const key of SYNC) { const r = await B.getData(USER.uid, k.id, sdoc(key)).catch(() => null); if (r) { remote[key] = r; newest = Math.max(newest, r.at); } }
+    if (newest > 0) { for (const key of Object.keys(remote)) writeKey(key, remote[key].json); restoreStash(k.id); }
+    else if (anyLocal()) { const stamp = Date.now(); for (const key of SYNC) { const v = readKey(key); if (v != null) await B.setData(USER.uid, k.id, sdoc(key), v, stamp).catch(() => {}); } }
+    try { const soc = readKey("unify.social.v1"); if (soc) { const j = JSON.parse(soc); if (j.kid !== k.name) { j.kid = k.name; writeKey("unify.social.v1", JSON.stringify(j)); } } } catch { /* no social yet */ }
+  }
+  setParentGrade(k.grade ?? 0); window.dispatchEvent(new Event("unify:social")); window.dispatchEvent(new Event("unify:progress")); await refreshShowcaseVisibility(); void syncNow("init"); buttonRefresh();
+}
+/** back to guest: the kid's keys stay on the cloud; the guest's old keys come back */
+function kidName(): string | null { const l = lget(); return l.mode === "family" ? l.kidName ?? null : null; }
+const kidColor = (): string => { const k = KIDS.find((x) => x.id === activeKid); return k?.color ?? "#4F91C7"; };
+export function signOutToGuest() {
+  const l = lget(); if (l.mode === "family" && l.kid) { clearLocal(l.kid); } lset({});
+  try { const b = localStorage.getItem(GUEST_BACKUP); if (b) { const o = JSON.parse(b); for (const k of Object.keys(o)) writeKey(k, o[k]); localStorage.removeItem(GUEST_BACKUP); } } catch { /* none */ }
+  activeKid = null; window.dispatchEvent(new Event("unify:social")); buttonRefresh();
+}
+
+/* ---------------- screens ---------------- */
+function show(html: string | HTMLElement, onShow?: () => void) { panel.innerHTML = ""; if (typeof html === "string") panel.innerHTML = html; else panel.appendChild(html); onShow?.(); }
+function close() { root.classList.remove("show"); }
+export function openFamily(start?: string) { root.classList.add("show"); route(start); }
+function route(start?: string) {
+  if (kidLogin) return scrKidPick();
+  if (!isOnline()) return scrOffline();
+  if (!USER) return scrAuth();
+  const l = lget();
+  if (start === "report") { if (l.mode === "family" && l.kid) return scrReport(l.kid); return scrPickKid("report"); }
+  if (start === "kids") return scrKids();
+  if (l.mode === "family" && l.kid) return scrHomeKid(l.kid);
+  return scrPickKid("play");
+}
+function scrOffline() { show(`<h2>Family accounts</h2><p>Family accounts save each child's progress to the cloud, so it follows them to any device. This copy of the game isn't connected to a cloud account yet, so everything stays on this device.</p><p class="fm-sm">A parent can switch it on later: it takes one free Supabase project and two lines in the game files.</p>`); const r = E("div", "fm-row", panel); const b = E("button", "fm-b pri", r, "Got it"); b.onclick = close; }
+function scrAuth() {
+  show(`<h2>Parent sign-in</h2><p>One parent account holds all the children's profiles. Children never need an email.</p>
+  <div class="fm-tab"><button class="fm-b on" id="fTin">Sign in</button><button class="fm-b" id="fTup">New account</button></div>
+  <input class="fm-in" id="fE" type="email" placeholder="Parent email" autocomplete="username"><input class="fm-in" id="fP" type="password" placeholder="Password" autocomplete="current-password">
+  <div class="fm-err" id="fX"></div><div class="fm-row"><button class="fm-b pri" id="fGo">Sign in</button><button class="fm-b" id="fForgot">Forgot password</button></div>`);
+  let mode: "in" | "up" = "in"; const $ = (id: string) => panel.querySelector(id) as any;
+  $("#fTin").onclick = () => { mode = "in"; $("#fTin").classList.add("on"); $("#fTup").classList.remove("on"); $("#fGo").textContent = "Sign in"; };
+  $("#fTup").onclick = () => { mode = "up"; $("#fTup").classList.add("on"); $("#fTin").classList.remove("on"); $("#fGo").textContent = "Create account"; };
+  $("#fForgot").onclick = async () => { const e = $("#fE").value.trim(); if (!e) { $("#fX").textContent = "Type your email first."; return; } try { await B.reset(e); $("#fX").textContent = "Reset email sent. Check your inbox."; } catch (err) { $("#fX").textContent = errText(err); } };
+  $("#fGo").onclick = async () => { $("#fX").textContent = ""; try { if (mode === "in") await B.signIn($("#fE").value.trim(), $("#fP").value); else await B.signUp($("#fE").value.trim(), $("#fP").value); } catch (err) { $("#fX").textContent = errText(err); } };
+}
+function scrPickKid(next: "play" | "report") {
+  show(`<h2>Who is playing?</h2><p>Pick your name and type your 4-digit code.</p><div id="fList"></div>`);
+  const list = panel.querySelector("#fList") as HTMLElement;
+  if (!KIDS.length) E("p", "", list, "No children yet. A parent adds them below.");
+  for (const k of KIDS) { const row = E("div", "fm-kid", list); row.style.marginBottom = "8px";
+    const ic = E("i", "", row, (k.icon || k.name[0] || "?").toUpperCase()); ic.style.background = k.color || COLORS[KIDS.indexOf(k) % COLORS.length];
+    E("b", "", row, k.name); const b = E("button", "fm-b", row, "Play"); b.onclick = () => scrPin(k, next); }
+  const bot = E("div", "fm-bot", panel);
+  const p = E("button", "fm-b", bot, "Parent area"); p.onclick = () => scrParent();
+  const g = E("button", "fm-b", bot, "Play as guest"); g.onclick = () => { signOutToGuest(); close(); };
+}
+function scrPin(k: KidDoc, next: "play" | "report") {
+  show(`<h2>Hi ${k.name}!</h2><p>Type your 4-digit code.</p><input class="fm-in fm-pin" id="fPin" inputmode="numeric" maxlength="4" autocomplete="off"><div class="fm-err" id="fX"></div><div class="fm-row"><button class="fm-b pri" id="fGo">Go</button><button class="fm-b" id="fBack">Back</button></div>`);
+  const pin = panel.querySelector("#fPin") as HTMLInputElement, x = panel.querySelector("#fX") as HTMLElement; pin.focus();
+  (panel.querySelector("#fBack") as HTMLButtonElement).onclick = () => scrPickKid(next);
+  const go = async () => { const h = await hashPin(k.salt, pin.value); if (h === k.hash) { if (next === "report") scrReport(k.id); else { await loadKid(k); close(); } } else { x.textContent = "Not quite. Try again."; pin.value = ""; pin.focus(); } };
+  (panel.querySelector("#fGo") as HTMLButtonElement).onclick = go; pin.onkeydown = (e) => { if (e.key === "Enter") go(); };
+}
+async function scrHomeKid(kidId: string) {
+  const k = KIDS.find((x) => x.id === kidId); if (!k) { lset({}); return scrPickKid("play"); }
+  show(`<h2>Hi ${k.name}!</h2><div class="fm-who"><i id="fIc"></i><b>${k.name}</b><span class="fm-sm" id="fMsg">${syncMsg}</span></div>
+  <div class="fm-row"><button class="fm-b pri" id="fPlay">Keep playing</button><button class="fm-b" id="fSwitch">Switch player</button><button class="fm-b" id="fReport">My report</button></div>
+  <div class="fm-bot"><button class="fm-b" id="fParent">Parent area</button></div>`);
+  (panel.querySelector("#fIc") as HTMLElement).textContent = (k.icon || k.name[0] || "?").toUpperCase(); (panel.querySelector("#fIc") as HTMLElement).style.background = k.color || COLORS[0];
+  (panel.querySelector("#fPlay") as HTMLButtonElement).onclick = close;
+  (panel.querySelector("#fSwitch") as HTMLButtonElement).onclick = () => scrPickKid("play");
+  (panel.querySelector("#fReport") as HTMLButtonElement).onclick = () => scrReport(kidId);
+  (panel.querySelector("#fParent") as HTMLButtonElement).onclick = () => scrParent();
+}
+/** the parent's area: manage children, see reports, family settings */
+async function scrParent() {
+  show(`<h2>Parent area</h2><p>Type your account password to continue.</p><input class="fm-in" id="fP" type="password" placeholder="Password" autocomplete="current-password"><div class="fm-err" id="fX"></div><div class="fm-row"><button class="fm-b pri" id="fGo">Continue</button><button class="fm-b" id="fBack">Back</button></div>`);
+  (panel.querySelector("#fBack") as HTMLButtonElement).onclick = () => route();
+  (panel.querySelector("#fGo") as HTMLButtonElement).onclick = async () => {
+    const pw = (panel.querySelector("#fP") as HTMLInputElement).value;
+    try { await B.signIn(USER!.email!, pw); scrParentHome(); } catch { (panel.querySelector("#fX") as HTMLElement).textContent = "Wrong password."; }
+  };
+}
+function scrParentHome() {
+  show(`<h2>Parent area</h2><div class="fm-row" style="flex-direction:column;align-items:stretch">
+  <button class="fm-b" id="fKids">Children (add, edit, remove)</button><button class="fm-b" id="fReports">Reports</button><button class="fm-b" id="fProfile">Family profile</button>
+  <button class="fm-b" id="fEmail">Resend confirmation email</button><button class="fm-b" id="fOut">Sign out</button></div><div class="fm-sm" id="fV"></div>`);
+  (panel.querySelector("#fV") as HTMLElement).textContent = USER!.verified ? "" : "Your email isn't confirmed yet. Progress syncs anyway.";
+  (panel.querySelector("#fKids") as HTMLButtonElement).onclick = () => scrKids();
+  (panel.querySelector("#fReports") as HTMLButtonElement).onclick = () => scrPickKid("report");
+  (panel.querySelector("#fProfile") as HTMLButtonElement).onclick = () => scrProfile();
+  (panel.querySelector("#fEmail") as HTMLButtonElement).onclick = async () => { try { await B.verifyEmail(); (panel.querySelector("#fV") as HTMLElement).textContent = "Confirmation email sent."; } catch (e) { (panel.querySelector("#fV") as HTMLElement).textContent = errText(e); } };
+  (panel.querySelector("#fOut") as HTMLButtonElement).onclick = async () => { await B.signOut(); signOutToGuest(); close(); };
+}
+function scrProfile() {
+  const p = PROFILE ?? { family: USER!.uid, name: "", role: "Parent", color: COLORS[0], updated: 0 };
+  show(`<h2>Family profile</h2><div class="fm-lab">Your name (kids see this)</div><input class="fm-in" id="fN" maxlength="24" value="${p.name.replace(/"/g, "&quot;")}">
+  <div class="fm-lab">You are the</div><div class="fm-row" id="fR"></div><div class="fm-lab">Your color</div><div class="fm-sw" id="fC"></div><div class="fm-err" id="fX"></div>
+  <div class="fm-row"><button class="fm-b pri" id="fSave">Save</button><button class="fm-b" id="fBack">Back</button></div>`);
+  let role = p.role, color = p.color;
+  const rr = panel.querySelector("#fR") as HTMLElement; for (const r of ["Mom", "Dad", "Parent", "Guardian"]) { const b = E("button", "fm-b" + (r === role ? " pri" : ""), rr, r); b.onclick = () => { role = r; rr.querySelectorAll("button").forEach((x) => x.classList.remove("pri")); b.classList.add("pri"); }; }
+  const cc = panel.querySelector("#fC") as HTMLElement; for (const c of COLORS) { const b = E("button", c === color ? "on" : "", cc); b.style.background = c; b.onclick = () => { color = c; cc.querySelectorAll("button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); }; }
+  (panel.querySelector("#fBack") as HTMLButtonElement).onclick = () => scrParentHome();
+  (panel.querySelector("#fSave") as HTMLButtonElement).onclick = async () => { const name = (panel.querySelector("#fN") as HTMLInputElement).value.trim() || "Parent";
+    PROFILE = { family: USER!.uid, name, role, color, updated: Date.now() }; try { await B.saveProfile(USER!.uid, PROFILE); } catch { /* offline */ } buttonRefresh(); scrParentHome(); };
+}
+function scrKids() {
+  show(`<h2>Children</h2><div id="fList"></div><div class="fm-row"><button class="fm-b pri" id="fAdd">Add a child</button><button class="fm-b" id="fBack">Back</button></div>`);
+  const list = panel.querySelector("#fList") as HTMLElement;
+  for (const k of KIDS) { const row = E("div", "fm-kid", list); row.style.marginBottom = "8px";
+    const ic = E("i", "", row, (k.icon || k.name[0] || "?").toUpperCase()); ic.style.background = k.color || COLORS[0];
+    E("b", "", row, `${k.name} (${k.age})`); const e = E("button", "fm-b", row, "Edit"); e.onclick = () => scrEditKid(k);
+    const d = E("button", "fm-b", row, "Remove"); d.onclick = () => scrDelKid(k); }
+  (panel.querySelector("#fAdd") as HTMLButtonElement).onclick = () => scrEditKid(null);
+  (panel.querySelector("#fBack") as HTMLButtonElement).onclick = () => scrParentHome();
+}
+function scrDelKid(k: KidDoc) {
+  show(`<h2>Remove ${k.name}?</h2><p>This deletes their saved progress from the cloud. Anything on this device stays until they are removed here too.</p><div class="fm-row"><button class="fm-b" id="fNo">Keep</button><button class="fm-b pri" id="fYes">Remove</button></div>`);
+  (panel.querySelector("#fNo") as HTMLButtonElement).onclick = () => scrKids();
+  (panel.querySelector("#fYes") as HTMLButtonElement).onclick = async () => { try { await B.deleteKid(USER!.uid, k.id); } catch { /* offline */ } KIDS = KIDS.filter((x) => x.id !== k.id);
+    if (activeKid === k.id) { await hideShowcase(); signOutToGuest(); } scrKids(); };
+}
+function scrEditKid(k: KidDoc | null) {
