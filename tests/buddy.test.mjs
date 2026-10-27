@@ -1,0 +1,24 @@
+// Study buddy: hints (never answers) and the real button in class. npm run build && node tests/buddy.test.mjs
+import http from "node:http"; import path from "node:path"; import os from "node:os"; import { mkdtemp, readFile } from "node:fs/promises"; import { build } from "esbuild"; import { chromium } from "playwright";
+const ROOT = path.resolve(new URL("..", import.meta.url).pathname), PORT = process.env.BUDDY_PORT || "8875";
+let bad = 0; const t = (n, c, v = "") => { console.log((c ? "PASS  " : "FAIL  ") + n + (v ? "  " + v : "")); if (!c) bad++; };
+const dir = await mkdtemp(path.join(os.tmpdir(), "bd-")), out = path.join(dir, "b.mjs");
+await build({ entryPoints: [path.join(ROOT, "src/game/buddy.ts")], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
+const { buddySay, BUDDY_NAME } = await import(out); const subs = ["math", "ela", "science", "history", "careers", "life"];
+t("every subject gets a nudge, a strategy and a help line, all different", subs.every((s) => new Set([0, 1, 2].map((i) => buddySay(s, "Fractions", i))).size === 3));
+t("hints never hand out answers", subs.every((s) => [0, 1, 2, 3, 4, 5, 6, 7].every((i) => !/(the answer is|answer:|it is \d|equals \d)/i.test(buddySay(s, "Fractions", i)))));
+t("after the help line it asks teach-back questions that use the lesson name", /Fractions/.test(buddySay("math", "Fractions", 3)) && buddySay("math", "Fractions", 3) !== buddySay("math", "Fractions", 4));
+t("the prompts cycle forever", buddySay("math", "Fractions", 3) === buddySay("math", "Fractions", 7) && buddySay("math", "Fractions", 100).length > 10);
+t("odd input is safe", buddySay("???", "<b>x</b>", -5).length > 10 && !/[<>]/.test(buddySay("math", "<b>x</b>", 3)));
+t("it always points back to the teacher", /teacher/i.test(buddySay("science", "Plants", 2)));
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".webmanifest": "application/json" };
+const srv = http.createServer(async (q, r) => { try { const f = path.join(ROOT, decodeURIComponent(new URL(q.url, "http://x").pathname)); if (!f.startsWith(ROOT)) throw 0; const b = await readFile(f); r.writeHead(200, { "content-type": MIME[path.extname(f)] || "application/octet-stream" }); r.end(b); } catch { r.writeHead(404); r.end(); } });
+await new Promise((ok) => srv.listen(+PORT, "127.0.0.1", ok));
+const b = await chromium.launch({ executablePath: process.env.SMOKE_CHROMIUM || undefined, args: ["--no-sandbox", "--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
+const p = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage(), errs = []; p.on("pageerror", (e) => errs.push(e.message));
+await p.goto(`http://127.0.0.1:${PORT}/classroom3d.html`); await p.waitForSelector("#bBuddy", { timeout: 90000 });
+t("hint button is on the class screen", /hint/i.test(await p.textContent("#bBuddy")));
+const wake = async () => { await p.evaluate(() => document.documentElement.classList.remove("calm-off")); await p.waitForTimeout(500); };
+await wake(); await p.click("#bBuddy"); await p.waitForTimeout(400); const c1 = await p.textContent("#cap"); t(`first press: ${BUDDY_NAME} gives a nudge`, c1.startsWith(BUDDY_NAME + ":") && c1.length > 30, c1.slice(0, 90));
+await wake(); await p.click("#bBuddy"); await p.waitForTimeout(400); const c2 = await p.textContent("#cap"); t("second press: a different, stronger hint", c2 !== c1 && c2.startsWith(BUDDY_NAME), c2.slice(0, 90));
+t("no script errors", errs.length === 0, errs[0] || ""); await b.close(); srv.close(); console.log(bad ? `\n${bad} FAILED` : "\nall passed"); process.exit(bad ? 1 : 0);
