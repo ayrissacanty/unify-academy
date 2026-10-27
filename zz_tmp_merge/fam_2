@@ -24,11 +24,11 @@ async function pull(uid: string, kid: string, force: boolean): Promise<boolean> 
 const paintBtn = () => {
   if (!(window as any).__SUPABASE && !(window as any).__FAMILY_BACKEND && !USER) {
     const g = parentGrade();
-    btn.textContent = !isMainAccount() ? (g == null ? "F46A Grade" : `F46A Grade ${g === 0 ? "K" : g}`) : (g == null ? "F46A Set grade" : `F46A Grade ${g === 0 ? "K" : g}`);
+    btn.textContent = !isMainAccount() ? (g == null ? "👪 Grade" : `👪 Grade ${g === 0 ? "K" : g}`) : (g == null ? "👪 Set grade" : `👪 Grade ${g === 0 ? "K" : g}`);
     btn.title = isMainAccount() ? "You are the main account. You set the grade." : "Only the main account can change the grade.";
     return;
   }
-  btn.textContent = activeKid ? `F46A ${lget().kidName ?? "Family"}` : USER ? "F46A Who's playing?" : "F46A Sign in"; btn.title = activeKid ? syncMsg || "Family account" : "Family accounts: save your progress and use it on any device";
+  btn.textContent = activeKid ? `👪 ${lget().kidName ?? "Family"}` : USER ? "👪 Who's playing?" : "👪 Sign in"; btn.title = activeKid ? syncMsg || "Family account" : "Family accounts: save your progress and use it on any device";
 };
 
 /** switch the device to a kid (or to guest): save the current one, swap the local data, then reload so every part of the game re-reads it */
