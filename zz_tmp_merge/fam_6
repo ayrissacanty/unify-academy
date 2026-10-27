@@ -1,0 +1,69 @@
+() => { const pw = get(); if (!pw) return; ok.setAttribute("disabled", ""); try { const ad = await B.createKidLogin!(k.id, lo.value.trim(), pw); k.login_email = ad; say(""); done(ad, pw); } catch (e) { say(errText(e)); ok.removeAttribute("disabled"); } };
+  };
+  const done = (ad: string, pw: string) => {
+    w.innerHTML = ""; E("h2", "", w, `${k.name}'s sign-in`); E("b", "", w, ad).id = "fmLoginAddr";
+    E("p", "", w, "The password is the one you just chose. Write it down and keep it safe."); const r = E("div", "fm-row", w), c1 = E("button", "fm-b", r, "Copy address"), c2 = E("button", "fm-b", r, "Copy password"); c1.onclick = () => copyText(ad, c1); c2.onclick = () => copyText(pw, c2);
+    E("p", "fm-sm", w, `This address is also ${k.name}'s UNIFY mailbox. It only works inside the academy.`); E("button", "fm-b go", w, "Done").onclick = show;
+  };
+  const change = () => {
+    w.innerHTML = ""; E("h2", "", w, `New password for ${k.name}`); const get = pwFields(), r = E("div", "fm-row", w), ok = E("button", "fm-b pri", r, "Change password"); E("button", "fm-b", r, "Cancel").onclick = show;
+    ok.onclick = async () => { const pw = get(); if (!pw) return; try { await B.setKidPassword!(k.id, pw); say("Password changed.", true); show(); } catch (e) { say(errText(e)); } };
+  };
+  show();
+}
+async function netSection(parent: HTMLElement, k: KidDoc, msg: HTMLElement) {
+  const w = E("div", "", parent); w.style.cssText = "display:flex;flex-direction:column;gap:8px;margin-top:12px"; E("h2", "", w, "Chat and visibility");
+  if (B.getNet && B.setNet) {
+    let st: { open: boolean; visible: boolean } | null = null; try { st = await B.getNet(USER!.uid, k.id); } catch { /* keep disabled */ }
+    const mk = (name: string, key: "open" | "visible") => { const b = E("button", "fm-b", w), paint = () => { b.textContent = `${name}: ${st && st[key] ? "On" : "Off"}`; }; paint(); b.disabled = !st;
+      b.onclick = async () => { if (!st) return; const next = !st[key]; try { await B.setNet!(USER!.uid, k.id, { [key]: next }); st[key] = next; paint(); } catch (e) { msg.style.color = ""; msg.textContent = errText(e); } }; };
+    mk("Chat with other families", "open"); mk("Seen by other students at school", "visible");
+    if (!st) E("div", "fm-sm", w, `Available after ${k.name} has opened Messages once`);
+    E("div", "fm-sm", w, "Students can chat with students in their own grade or one grade above or below, and only when both families have this on. Everyone else can only send emotes.");
+  }
+  E("button", "fm-b", w, "Live chats").onclick = () => { window.open("parent.html?live=1", "_blank"); };
+}
+
+function localGrade() {
+  const g = parentGrade();
+  if (!isMainAccount()) {
+    card("Your grade");
+    E("p", "", panel, g == null ? "The main account has not set your grade yet. You can't choose it yourself." : `You are in ${gradeName(g)}. Only the main account can change it.`);
+    const back = E("button", "fm-b", panel, "Close"); back.onclick = () => close(); return;
+  }
+  card("Set the student's grade");
+  E("p", "", panel, "You are the main account, so you can set this. A student on their own profile cannot. Students can share a classroom, and each one only sees the lesson for their grade.");
+  const ag = gradeSelect(panel, g ?? 4);
+  const row = E("div", "fm-row", panel), go = E("button", "fm-b pri", row, "Save grade"), back = E("button", "fm-b", row, "Close");
+  back.onclick = () => close();
+  go.onclick = () => { setParentGrade(+ag.value); close(); paintBtn(); };
+}
+
+/* ---------------- start ---------------- */
+function start() {
+  const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st);
+  root = E("div", "", document.body); root.id = "fam"; panel = E("div", "fm-p", root); root.addEventListener("keydown", (e) => e.stopPropagation()); root.addEventListener("click", (e) => { if (e.target === root && (USER || lget().mode)) close(); });
+  const nav = document.querySelector("nav"), phone = document.getElementById("tPhone"); btn = E("button", "") as HTMLButtonElement; btn.id = "tFam"; if (nav && phone) nav.insertBefore(btn, phone.nextSibling); else document.body.appendChild(btn); btn.onclick = () => { if (USER && role() === "kid" && activeKid) void kidHome(); else if (USER && !role()) void checkin(); else open(); };
+  activeKid = lget().mode === "family" ? lget().kid ?? null : null; paintBtn();
+  if (!(window as any).__SUPABASE && !(window as any).__FAMILY_BACKEND) { btn.textContent = parentGrade() == null ? "\u{1F46A} Set grade" : `\u{1F46A} Grade ${parentGrade() === 0 ? "K" : parentGrade()}`; btn.onclick = () => localGrade(); return; }       // no cloud: the account holder still sets the grade on this device
+  B = (window as any).__FAMILY_BACKEND ?? supabaseBackend();
+  B.onUser(async (u) => {
+    if (kidSigningIn) return;
+    if (u && /@unify\.mail$/i.test(u.email || "")) {                          // a child's own sign-in: never a parent
+      try { const s = B.kidLogin ? await B.kidLogin() : null; if (s) { applyKid(s, u.email!); if (await pull(s.family, s.kid.id, false) && !sessionStorage.getItem("unify.family.reloaded")) { sessionStorage.setItem("unify.family.reloaded", "1"); location.reload(); return; } } else { USER = null; kidLogin = false; } } catch { /* offline: keep playing */ }
+      void refreshClassmates(); paintBtn(); return;
+    }
+    if (kidLogin) { kidLogin = false; KIDS = []; activeKid = null; setRole(null); }
+    if ((u?.uid ?? null) !== (USER?.uid ?? null)) { PROFILE = null; PROFILE_LOADED = false; }
+    USER = u;
+    if (u && activeKid) { try { KIDS = await B.kids(u.uid); if (!KIDS.some((k) => k.id === activeKid)) { clearLocal(null); lset({ mode: "family" }); activeKid = null; } else if (await pull(u.uid, activeKid, false) && !sessionStorage.getItem("unify.family.reloaded")) { sessionStorage.setItem("unify.family.reloaded", "1"); location.reload(); return; } } catch { /* offline: keep playing */ } }
+    if (!u && activeKid) activeKid = null;                                  // signed out elsewhere: stop syncing, keep playing locally
+    void refreshClassmates();
+    paintBtn(); if (u && !role()) { void checkin(); return; } if (!u && lget().mode === "family") { open(); return; } if (!lget().mode) lset({ mode: "guest" });
+  });
+  setInterval(() => { if (document.visibilityState === "visible" && activeKid) void pushNow(); }, 15000);
+  setInterval(() => { if (document.visibilityState === "visible") void refreshClassmates(); }, 60000);
+  addEventListener("pagehide", () => { void pushNow(); }); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void pushNow(); });
+  (window as any).__family = { open, pushNow, get kid() { return activeKid; }, get user() { return USER; } };
+}
+if (document.readyState === "loading") addEventListener("DOMContentLoaded", start); else start();
