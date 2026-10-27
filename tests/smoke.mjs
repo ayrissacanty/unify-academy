@@ -16,7 +16,7 @@ const CANVAS_MS = { "hallway3d.html": 300000 };
 const canvasMs = (page) => Number(process.env.SMOKE_CANVAS_MS) || CANVAS_MS[page] || 150000;
 const PAGES = [
   ["index.html", false], ["hallway3d.html", true], ["classroom3d.html", true], ["auditorium3d.html", true],
-  ["news.html", false], ["phone.html", false], ["opendoor.html", false], ["fieldtrip.html", true],
+  ["news.html", false], ["phone.html", false], ["opendoor.html", false], ["fieldtrip.html", true], ["clubs3d.html", true],
   ["curriculum.html", false], ["parent.html", false], ["mail.html", false], ["newsdesk.html", false], ["dorm.html", true],
   // earlier versions and prototypes: kept and shipped too
   ["pages.html", false], ["auditorium.html", true], ["hallway.html", true], ["new.html", false], ["prototypes/newsroom-enhanced.html", false],
@@ -54,10 +54,7 @@ for (const [page, needsCanvas] of PAGES) {
   p.on("console", (m) => { if (m.type() === "error" && !noise(m.text())) problems.push("console: " + m.text().slice(0, 160)); });
   p.on("response", (r) => { if (r.status() >= 400 && r.url().startsWith(BASE) && !r.url().includes("/api/") && !noise(r.url())) problems.push(`${r.status()} ${r.url().replace(BASE, "")}`); });
   try {
-    // index.html embeds the 3D hallway in an iframe, so its first software-GL frame can stall the page for minutes in CI as well
-    const heavy = needsCanvas || page === "index.html";
-    const res = await p.goto(`${BASE}/${page}`, { waitUntil: heavy ? "commit" : "domcontentloaded", timeout: 60000 });
-    if (page === "index.html") await p.waitForLoadState("domcontentloaded", { timeout: canvasMs("hallway3d.html") }).catch(() => problems.push("index.html did not finish loading"));
+    const res = await p.goto(`${BASE}/${page}`, { waitUntil: needsCanvas ? "commit" : "domcontentloaded", timeout: 60000 });
     if (!res || !res.ok()) problems.push(`page status ${res && res.status()}`);
     // 3D scenes can take a minute to start in software GL (CI/sandbox); a phone GPU does it in seconds
     if (needsCanvas) { const ms = canvasMs(page); try { await p.waitForSelector("canvas", { timeout: ms, state: "attached" }); } catch { problems.push(`no <canvas> appeared within ${ms / 1000}s`); } }

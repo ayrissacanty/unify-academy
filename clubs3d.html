@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>UNIFY Club Corner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap">
+<style>
+:root{--kraft:#F3E7CF;--edge:#C9B28A;--ink:#4A3B3F;--acc:#E07A66;--ui:"Fredoka","Trebuchet MS",system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#F6E6CF;color:var(--ink);font-family:var(--ui);overflow:hidden;user-select:none}
+#game{position:absolute;inset:0}#game canvas{display:block;width:100%;height:100%}
+button{font:inherit;font-size:14px;color:var(--ink);background:var(--kraft);border:1px solid rgba(255,255,255,.7);border-radius:12px;padding:6px 12px;min-height:38px;cursor:pointer;box-shadow:0 2px 0 var(--edge),0 5px 8px rgba(80,50,40,.25)}
+button:focus-visible{outline:3px solid #3b3552;outline-offset:2px}button.go{background:var(--acc);color:#fff;border-color:var(--acc)}button.on{background:#3FB68B;color:#fff;border-color:#3FB68B}
+#top{position:absolute;z-index:30;top:calc(10px + env(safe-area-inset-top,0px));left:10px;right:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#top .t{background:var(--kraft);border-radius:12px;padding:6px 12px;font-weight:600;box-shadow:0 2px 0 var(--edge)}
+#list{position:absolute;z-index:30;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+#list button{min-height:34px;font-size:13px;padding:4px 10px}#list button .d{opacity:.7;font-size:11px;margin-left:4px}
+#pop{position:absolute;z-index:40;left:50%;top:50%;transform:translate(-50%,-50%);width:min(380px,92vw);display:none;background:#FFF9F0;border-radius:20px;padding:16px 18px;box-shadow:0 12px 40px rgba(60,40,30,.4);border:3px solid var(--edge)}
+#pop.show{display:block}#pop h2{font-size:22px;margin-bottom:4px}#pop p{font-size:15px;line-height:1.4;margin:4px 0}#pop .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}#pop small{opacity:.75}
+#hint{position:absolute;z-index:20;left:50%;top:62px;transform:translateX(-50%);font-size:13px;background:rgba(255,249,240,.9);border-radius:10px;padding:4px 10px;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="top"><button id="bBack">▲ Back to school</button><span class="t">🎒 Club Corner</span><button id="bToday">⭐ Today &amp; clubs</button></div>
+<div id="hint">Tap a table to see the club. Drag to look around.</div>
+<div id="pop" role="dialog" aria-modal="true" aria-labelledby="pT"><h2 id="pT"></h2><p id="pB"></p><p id="pM"></p><p><small id="pP"></small></p><div class="row"><button id="pJoin" class="go"></button><button id="pOpen">Open clubs &amp; meetings</button><button id="pX">Close</button></div></div>
+<nav id="list" aria-label="Clubs"></nav>
+<script src="demo/dist/clubs3d.js"></script>
+</body>
+</html>
