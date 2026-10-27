@@ -82,6 +82,18 @@ Packs ship in `curriculum/` (listed in `curriculum/index.json`) or are imported 
 In class: **More → Textbook** (chapters, search; every class also has auto-made class notes), **More → Electives** (extra courses such as the bundled high-school electives: Algebra I, Geometry, Statistics, Computer Science, Psychology, Public Speaking, Journalism, Economics, Test Prep, Applications, Study Skills).
 The class-times bulletin board: classroom **Camera → Bulletin board**, hallway **Go to → Class-times board** (or key **B**).
 
+## Class pet, daily moments, stamps, study buddy, dorm rewards, parent weekly summary
+- **Class pet** (`src/class3d/pet.ts`): a play pen in the front-left corner of the classroom. Pick a rabbit, hamster, turtle or guinea pig, name it, and feed it once a day (the chip at the bottom left). Kept on the device (`unify.pet.v1`) and synced to the family account. Feeding counts as a daily quest.
+- **Moment of the day** (`src/hall3d/daily.ts`): a short, kind announcement at morning arrival that changes every day (14 of them, never the same two days in a row).
+- **Lesson stamps** (`src/game/stamps.ts`): finishing a lesson shows "Stamp 4 of 20 in Math" with a star bar; the 5th, 10th, 20th and last stamp are milestones.
+- **Study buddy "Sparky"** (`src/game/buddy.ts`): the "Need a hint?" button in class gives a nudge, then a strategy, then points to the teacher, then teach-it-back questions. Hints only, never answers, and no AI is needed.
+- **Dorm rewards** (`src/dorm/rewards.ts`): Pet cage (feed the pet 3 times), Spirit pennant (3-day quest streak) and Champion cup (5-day streak) are listed in the dorm's Add furniture only once earned.
+- **Parent weekly summary** (`src/game/weekly.ts`, shown on `parent.html`): a short, positive "This week" note per child (class days, lessons finished, quest streak, pet, rewards). It never shows scores or compares children.
+- Seasons and weather already come from `src/game/world.ts` and `src/hall3d/weatherfx.ts`; clubs from `src/game/community.ts`.
+- Tests: `node tests/class-pet.test.mjs`, `daily-moment`, `stamps`, `buddy`, `dorm-rewards`, `weekly` (the browser ones need `SMOKE_CHROMIUM` and a build).
+- **Club Corner** (`clubs3d.html`, `src/clubs3d/ClubRoom3D.ts`, `demo/clubs3d.ts`): a 3D room with a table per club, a weekly schedule board (today highlighted, today's clubs glow) and a green check on the clubs you joined. Tap a table or use the list at the bottom to read about a club, join or leave it, and open the existing clubs and meetings screen. Reached from the Today panel's "Club Corner" button. Test: `node tests/club-room.test.mjs`.
+- **Stamp card** (Today panel, `src/hall3d/hubui.ts`): one row per subject with stars and n/total. The classroom saves the real lesson totals (`unify.lessoncounts.v1`) once the lesson packs have loaded; until then a subject just says how many lessons are finished.
+
 
 ---
 

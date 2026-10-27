@@ -6,6 +6,10 @@ import { Cosm, ITEMS, type Slot } from "../game/cosmetics";
 import { Quests, todays, SPIRIT_GOAL } from "../game/quests";
 import { Safety, parentUnlocked } from "../game/safety";
 import { communityTab } from "./communityui";
+import { Progress, ALL_SUBJECTS, SUBJECT_NAME } from "../game/progress";
+import { CURRICULUM } from "../class3d/curriculum";
+import { stampBar, readLessonCounts } from "../game/stamps";
+import { loadPet, petMood } from "../class3d/pet";
 const CSS = `.hb{position:fixed;inset:0;z-index:70;background:rgba(74,59,63,.45);display:none;align-items:center;justify-content:center;font-family:"Fredoka","Trebuchet MS",system-ui,sans-serif;color:#4A3B3F}.hb.show{display:flex}
 .hb-p{background:#F3E7CF;border:1px solid #fff;border-radius:20px;box-shadow:0 3px 0 #C9B28A,0 18px 36px rgba(0,0,0,.4);width:min(720px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
 .hb-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #C9B28A}.hb-h h2{font-size:20px;flex:1}.hb-t{display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap}
@@ -38,12 +42,25 @@ function today(b: HTMLElement, _redraw: () => void, hooks: HubHooks) {
   E("small", "", sc, `Streak: ${st} day${st === 1 ? "" : "s"} 🔥 (a missed day just starts a fresh streak, nothing is lost)`).style.display = "block";
   E("h3", "", b, "Today's quests");
   for (const t of todays()) { const done = Quests.isDone(t), c = E("div", "hb-card hb-q" + (done ? " done" : ""), b); E("span", "ic", c, t.icon); const x = E("div", "", c); E("b", "", x, t.text); E("small", "", x, `${Quests.progress(t)}/${t.n}`).style.display = "block"; }
+  stampCard(b);
   E("h3", "", b, "Jump in"); const r = E("div", "hb-row", b);
+  E("button", "hb-b go", r, "🎒 Club Corner").onclick = () => { window.open("clubs3d.html", "_blank"); };
   if (hooks.openGames) E("button", "hb-b go", r, "🎮 Practice games").onclick = () => { hooks.openGames!(); };
   E("button", "hb-b go", r, "📚 Curriculum app").onclick = () => { window.open("curriculum.html", "_blank"); };
   if (hooks.openTrip) E("button", "hb-b go", r, "🥽 VR field trip").onclick = () => { hooks.openTrip!(); };
   if (hooks.goTo) { E("button", "hb-b", r, "🚪 The Open Door").onclick = () => hooks.goTo!("open"); E("button", "hb-b", r, "🎭 Auditorium").onclick = () => hooks.goTo!("news"); }
   void ev;
+}
+/** the stamp card: one row per subject, a star for every tenth of the lessons finished, plus the class pet's mood */
+function stampCard(b: HTMLElement) {
+  E("h3", "", b, "Your stamp card"); const card = E("div", "hb-card", b), counts = readLessonCounts(); let any = false;
+  for (const s of ALL_SUBJECTS) {
+    const n = Progress.doneCount(s), total = Math.max(counts[s] ?? 0, CURRICULUM[s]?.length ?? 0);
+    const known = !!counts[s]; if (!known && !n) continue; any = true; const row = E("div", "hb-row", card); row.style.justifyContent = "space-between"; E("b", "", row, SUBJECT_NAME[s]);
+    E("span", "", row, known ? `${stampBar(n, total)}  ${Math.min(n, total)}/${total}` : `${n} finished`).title = `${n} lesson${n === 1 ? "" : "s"} finished`;
+  }
+  if (!any) E("small", "", card, "Finish a lesson to earn your first stamp.");
+  const pet = loadPet(); if (pet) { const m = petMood(pet), r = E("div", "hb-row", card); r.style.marginTop = "6px"; E("small", "", r, `🐾 ${pet.name} is ${m === 3 ? "happy" : m === 2 ? "a little peckish" : "hungry"} ${"♥".repeat(m)}${"♡".repeat(3 - m)}. Feed it in the classroom.`); }
 }
 function choiceRow(parent: HTMLElement, label: string, opts: { id: string; label: string; color?: string; emoji?: string }[], cur: string | undefined, set: (id: string) => void) {
   E("h3", "", parent, label); const r = E("div", "hb-row", parent); for (const o of opts) { const b = E("button", "hb-b" + (o.id === cur ? " on" : ""), r, `${o.emoji ?? ""} ${o.label}`.trim()); if (o.color) b.style.borderLeft = `8px solid ${o.color}`; b.onclick = () => set(o.id); }

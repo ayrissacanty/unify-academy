@@ -27,6 +27,7 @@ main{max-width:640px;margin:0 auto}h1{font-size:24px;margin:0 0 2px}h2{font-size
 <section id="live" tabindex="-1" style="max-width:640px;margin:0 auto;outline:none"></section>
 <script src="supabase-config.js"></script>
 <script src="supabase-client.js"></script>
+<script src="demo/dist/weekly.js"></script>
 <script type="module">
 const $=document.getElementById('m'),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));
 const hm=m=>{const h=Math.floor(m/60)%24,mm=m%60;return`${h%12||12}:${String(mm).padStart(2,'0')} ${h<12?'AM':'PM'}`;};
@@ -122,6 +123,19 @@ async function view(uid){
   return cards[key]={d,dot,list,n:0};
  };
  kids.forEach(k=>cardFor(k));
+ kids.forEach(k=>week(uid,k,cardFor(k)));
+  const week=async(fam,k,cd)=>{
+  try{
+   const r=await c.from('kid_data').select('key,json').eq('family',fam).eq('kid',k.id).in('key',['unify.progress.v1','unify.quests.v1','unify.pet.v1','unify.dormrewards.v1']);
+   if(r.error||!window.__weekly)return;const m={};(r.data||[]).forEach(x=>m[x.key]=x.json);
+   if(!Object.keys(m).length)return;
+   const w=window.__weekly.weekly({progress:m['unify.progress.v1'],quests:m['unify.quests.v1'],pet:m['unify.pet.v1'],rewards:m['unify.dormrewards.v1']});
+   const b=document.createElement('div');b.className='week';b.style.cssText='margin:8px 0 6px;padding:8px 10px;border-radius:10px;background:#FFF6EA;font-size:13px;line-height:1.45';
+   const h=document.createElement('b');h.textContent='This week';b.appendChild(h);
+   w.lines.forEach(t=>{const p=document.createElement('div');p.textContent='• '+t;b.appendChild(p);});
+   cd.d.insertBefore(b,cd.list);
+  }catch(e){/* the summary is a bonus; chats keep working without it */}
+ };
  const nameOf=id=>(users[id]&&users[id].name)||id;
  const bubble=(t,m,fresh)=>{const b=el('div','m'+(fresh?' hl':''),t.log);el('small','',b,nameOf(m.from_id)+' · '+tfmt(m.at));el('span','',b,m.text);if(fresh)setTimeout(()=>b.classList.remove('hl'),2600);t.log.scrollTop=t.log.scrollHeight;};
  const prev=t=>{const a=msgs[t.tid]||[],m=a[a.length-1];t.pv.textContent=m?(nameOf(m.from_id)+': '+m.text):'No messages yet';t.tm.textContent=m?tfmt(m.at):'';};

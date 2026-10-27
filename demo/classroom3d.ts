@@ -1,3 +1,5 @@
+import { buddySay, BUDDY_NAME } from "../src/game/buddy";
+import { stampFor, stampBar, saveLessonCounts } from "../src/game/stamps";
 import { Classroom3D, type CamMode } from "../src/class3d/Classroom3D";
 import { Director } from "../src/class3d/director";
 import { ALL_LESSONS, CURRICULUM, type LessonDef } from "../src/class3d/curriculum";
@@ -42,6 +44,9 @@ const life = new ClassroomLife({
 }, document.body); life.auto = false; (window as any).__life = life;
 life.onState = (st) => { $("bHand").classList.toggle("on", st.handUp); $("bHand").textContent = st.handUp ? "Hand up" : "Raise hand (H)"; };
 $("bHand").onclick = () => life.raiseHand();
+/* ---- study buddy: hints, never answers (nudge, then strategy, then ask for help, then teach-it-back prompts) ---- */
+let buddyPress = 0; const bBuddy = document.createElement("button"); bBuddy.id = "bBuddy"; bBuddy.type = "button"; bBuddy.className = $("bHand").className; bBuddy.textContent = "💡 Need a hint?"; bBuddy.title = `${BUDDY_NAME} gives hints, not answers`; $("bHand").after(bBuddy);
+bBuddy.onclick = () => { ui.caption(BUDDY_NAME, buddySay(subject, lesson.title, buddyPress++), 14000); };
 const bV = $("bVoice"); const paintV = () => { bV.textContent = voice.enabled ? "🔊 Voice on" : "🔇 Voice off"; bV.classList.toggle("on", voice.enabled); }; bV.onclick = () => { voice.enabled = !voice.enabled; paintV(); }; if (!voice.available) bV.style.display = "none"; paintV();
 
 /* ---- captions + steps ---- */
@@ -58,7 +63,7 @@ const ui = {
     if (l.elective) { Progress.completeExtra(l.subject as Subject, l.id); this.caption("Class", `Elective lesson done: ${l.title}. Open More, then Textbook, to read more, or Electives to pick another.`, 10000); return; }
     if (l.extra) { Progress.completeExtra(l.subject as Subject, l.id); paintExtra(); const pl = Placement.plan(l.subject as Subject); this.caption("Class", pl?.next ? `Extra lesson done! Next extra lesson: ${pl.next.title}. Your regular class is still waiting.` : "Extra lessons done: you are caught up with your class!", 10000); return; }
     const list = bandLessons(CURRICULUM[l.subject]);
-    const next = Progress.complete(l.subject, l.id, list.length); room.refreshBoard(); const b = $("bNext"); b.hidden = false; b.textContent = `Next lesson: ${list[next].title}`; $("moreDot").classList.add("on"); this.caption("Class", `Lesson complete! The next lesson is open: ${list[next].title}. Open More and choose Next lesson to get ahead.`, 12000);
+    const next = Progress.complete(l.subject, l.id, list.length); const stamp = stampFor(SUBJECT_NAME[l.subject as Subject], Progress.doneCount(l.subject as Subject), list.length); room.refreshBoard(); const b = $("bNext"); b.hidden = false; b.textContent = `Next lesson: ${list[next].title}`; $("moreDot").classList.add("on"); this.caption("Class", `${stamp.text} ${stampBar(stamp.n, stamp.of)} Lesson complete! The next lesson is open: ${list[next].title}. Open More and choose Next lesson to get ahead.`, 12000);
   },
   book(ref: string) { curRef = ref; $("bBook").classList.add("on"); $("moreDot").classList.add("on"); },
   setTitle(t: string) { $("ltitle").textContent = t; },
@@ -105,7 +110,7 @@ async function start(s: Subject, att: number[] = lastAtt) {
 }
 /** run one lesson: a regular one, or an extra (catch-up) lesson that sits beside regular classes */
 function begin(l: LessonDef, att: number[] = lastAtt) {
-  lesson = l; subject = l.subject as Subject; const mine = parentGrade(); $("subj").textContent = (l.elective ? "Elective · " + l.elective : l.extra ? "Extra · " + SUBJECT_NAME[subject] : SUBJECT_NAME[subject]) + (mine != null ? ` · grade ${mine === 0 ? "K" : mine}` : "") + " · only your grade"; curRef = l.bookRef ?? ""; $("bBook").classList.remove("on"); ($("bLab") as HTMLButtonElement).hidden = !l.lab.id;
+  lesson = l; subject = l.subject as Subject; buddyPress = 0; const mine = parentGrade(); $("subj").textContent = (l.elective ? "Elective · " + l.elective : l.extra ? "Extra · " + SUBJECT_NAME[subject] : SUBJECT_NAME[subject]) + (mine != null ? ` · grade ${mine === 0 ? "K" : mine}` : "") + " · only your grade"; curRef = l.bookRef ?? ""; $("bBook").classList.remove("on"); ($("bLab") as HTMLButtonElement).hidden = !l.lab.id;
   room.assign(att); life.stop(); life.lesson = lesson; chat.close(); $("bLab").classList.remove("on"); $("moreDot").classList.remove("on"); ($("bNext") as HTMLButtonElement).hidden = true; room.auto = true; markCam("auto"); room.refreshBoard(subject); paintExtra(); showGradeLogic(l.title);
   void director.run(lesson); void life.start(subject);
 }
@@ -147,7 +152,8 @@ room.onTapDemo = openLab; $("bLab").onclick = openLab;
 let wanted: string | null = params.get("subject"), wantedAtt: number[] = [];
 addEventListener("message", (e) => { const d = e.data; if (d && d.type === "unify:lesson" && SUBJECTS.includes(d.subject)) start(d.subject, Array.isArray(d.attendees) ? d.attendees.filter((x: any) => Number.isInteger(x)) : []); else if (d && d.type === "unify:exit") { director.stop(); life.stop(); } });
 start(SUBJECTS.includes(wanted as Subject) ? (wanted as Subject) : "math").catch((e) => console.error("lesson start failed", e));
-void Packs.loadBundled();
+const ready = Packs.loadBundled();
+ready.then(() => saveLessonCounts(Object.fromEntries(Object.keys(CURRICULUM).map((k) => [k, CURRICULUM[k as Subject].length])))).catch(() => {});
 parent !== window && parent.postMessage({ type: "unify:auditorium-ready" }, "*");
 void ALL_LESSONS; void TEACHER_BY_SUBJECT;
 import { VIDEO_BY_ID } from "../src/class3d/videos"; (window as any).__vids = VIDEO_BY_ID;

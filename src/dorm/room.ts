@@ -1,4 +1,5 @@
 /** UNIFY Academy: My Dorm room. Builds the campus dorm, hotspots, the furniture editor (snap, collide, stack, undo) and persistence. */
+import { hasReward } from "./rewards";
 import * as THREE from "three";
 import { B, CATALOG, FurnitureDefX, canvasTex, cvs, disposeTree, mk, nightFactor, releaseMaterials, rng, shade } from "./furniture";
 import { DORM_KEY } from "./types";
@@ -369,7 +370,7 @@ export function createDorm(style: Style, layoutIn?: DormLayout): DormApiPlus {
     setEditing(on) { editing = on; if (!on) select(null); showSel(); hl.g.visible = false; hoverUid = null; },
     get editing() { return editing; },
     select, onChange(cb) { changeCbs.push(cb); }, onSelect(cb) { selectCbs.push(cb); },
-    catalog: () => CATALOG,
+    catalog: () => CATALOG.filter((d) => !d.reward || hasReward(d.id)),
     add: (id, color) => spawn(id, color),
     moveSelected(dx, dz) { const e = selEntry(); if (!e) return; const x = e.p.x + dx, z = e.p.z + dz; if (tryMove(e, x, z) || tryMove(e, x, e.p.z) || tryMove(e, e.p.x, z)) { refreshHotspots(); commit(); } },
     rotateSelected(q) { const e = selEntry(); if (!e || e.def.wall) return; const r = e.p.rot + q * Math.PI / 2; const nr = Math.atan2(Math.sin(r), Math.cos(r)); if (tryMove(e, e.p.x, e.p.z, nr)) { refreshHotspots(); commit(); } },
