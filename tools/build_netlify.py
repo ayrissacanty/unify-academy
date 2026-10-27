@@ -73,7 +73,7 @@ PAGES = [
     "news.html",
     "phone.html",
     "opendoor.html",
-    "fieldtrip.html",
+    "clubs3d.html", "fieldtrip.html",
     "curriculum.html",
     "parent.html",
     "mail.html",
