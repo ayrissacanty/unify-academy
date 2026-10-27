@@ -1,3 +1,4 @@
+import { momentFor } from "./daily";
 import { Events } from "../game/events";
 import * as THREE from "three";
 import { Beam } from "../shared/beam";
@@ -15,12 +16,9 @@ import { Progress } from "../game/progress";
 import { CURRICULUM } from "../class3d/curriculum";
 import { toLook, type AvatarSpec } from "./avatar";
 import { Mood, Gfx } from "./mood";
-import { seasonOf, weatherNow, refreshWeather } from "../game/world";
+import { seasonOf, weatherNow } from "../game/world";
 import { buildHallDetails } from "./hallDetails";
 import { isPixar } from "../shared/look";
-import { rememberCurrent, roommateFor } from "./mates";
-import { createDorm, defaultDormLayout, type DormApiPlus } from "../dorm/room";
-import { createChar3D, type Char3DEx } from "../dorm/char3d";
 import { PixarHall, PixarCrowd } from "./pixarHall";
 import { getStyle } from "../dorm/style";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
@@ -33,7 +31,7 @@ const UNIT = 1.75 / 45;                                              // one draw
 const g2w = (gx: number, gy: number) => new THREE.Vector3(gx - W / 2, 0, gy - H / 2);
 const STYLES = ["crop", "pony", "bun", "curly", "bob", "long", "crop", "pony", "curly", "bob"];
 const LOCKER_COL = ["#7fb2d6", "#f2a79b", "#9fd0b0", "#f4d488", "#b8a8da", "#f6b294", "#8fc9c4", "#e9a0c0"];
-const SUBJ_COL: Record<Subject, string> = { math: "#1E6FD9", ela: "#1F8A4C", science: "#00A6E0", history: "#E05A1A", careers: "#F0A202", life: "#0E9A72" };
+const SUBJ_COL: Record<Subject, string> = { math: "#4F91C7", ela: "#88B89A", science: "#8FC9E8", history: "#C98569", careers: "#E8A33D", life: "#7CB6A0" };
 const SUBJ_LABEL: Record<Subject, string> = { math: "MATH", ela: "ELA", science: "SCIENCE", history: "HISTORY", careers: "CAREERS", life: "LIFE" };
 /** grade bands by student index: K-2 (smallest) up to high school; adults (staff) are the tallest */
 const AGES: Age[] = ["k2", "g35", "g68", "hs", "g35", "g68", "k2", "hs", "g68", "g35"];
@@ -65,9 +63,8 @@ export class HallScene {
   /** scripted walking (arrival from the bus, walking in) that ignores walls and input */
   cine: { pts: THREE.Vector3[]; done?: () => void; speed: number } | null = null; bus: THREE.Group | null = null; private busState: { t: number; mode: "idle" | "in" | "wait" | "out"; from: number; to: number; span: number; arm: THREE.Mesh; door: THREE.Mesh } | null = null; onBusStopped: () => void = () => {};
   private nameStar: THREE.Object3D | null = null; private vowelPos: { x: number }[] = []; private signAt: THREE.Vector3 | null = null; private signCamT = -1; private rideT = -1; private afterRide: (() => void) | null = null; private dormX = -86;
-  private rideFx: THREE.Points | null = null; private rideKind = "";
-  private dormHouse: THREE.Object3D | null = null; private dormRoom: THREE.Object3D | null = null; private dormApi: DormApiPlus | null = null; private mateChar: Char3DEx | null = null; private dormBed = new THREE.Vector3(); private dormDesk = new THREE.Vector3(); private dormDoor = new THREE.Vector3();
-  private morn: "" | "look" | "wake" | "dress" | "desk" | "out" | "ride" = ""; private mornT = 0; private mornSwapped = false; private mornDay: AvatarSpec | null = null; private mornDone: (() => void) | null = null; private spin = 0;
+  private dormHouse: THREE.Object3D | null = null; private dormRoom: THREE.Object3D | null = null; private dormBed = new THREE.Vector3(); private dormDesk = new THREE.Vector3(); private dormDoor = new THREE.Vector3();
+  private morn: "" | "wake" | "dress" | "desk" | "out" | "ride" = ""; private mornT = 0; private mornSwapped = false; private mornDay: AvatarSpec | null = null; private mornDone: (() => void) | null = null; private spin = 0;
   onDress: (() => void) | null = null; onBulletin: (() => void) | null = null;
   private cars: { g: THREE.Group; door: THREE.Mesh; from: number; to: number; t: number; mode: "idle" | "in" | "wait" | "out" }[] = []; private onCarStopped: () => void = () => {};
   yaw = 0; pitch = 0.36; zoom = 1; fpitch = 0; navLabel = "";
@@ -192,7 +189,7 @@ export class HallScene {
 
   /* ------------------------------------------------------------ the campus: floors, outer walls, blocks, lockers, doors, plaza */
   private buildCampus() {
-    const S = this.scene, cap = this.plain("#F4F7FB"), outer = this.plain("#C0392B");
+    const S = this.scene, cap = this.plain("#F8E2C8"), outer = this.plain("#E07A5F");
     // soft diorama shadow on the ground
     const under = new THREE.Mesh(new THREE.PlaneGeometry(W + 7, H + 7), new THREE.MeshBasicMaterial({ map: this.tex("dio", () => T.cardShadowTex()), transparent: true, opacity: 0.7, depthWrite: false }));
     under.rotation.x = -Math.PI / 2; under.position.set(0.4, -0.02, 0.4); S.add(under);
@@ -206,7 +203,7 @@ export class HallScene {
 
     // outer walls (paper thickness: pale cap, darker outside); the south wall has the entrance gap with a lintel + banner
     const wall = (len: number, cx: number, cz: number, horiz: boolean, innerIdx: number) => {
-      const inner = new THREE.MeshStandardMaterial({ map: this.rep("wall", () => T.wallTex(), len / 4), color: "#FFD56A", roughness: 0.62 }), mats = [outer, outer, cap, outer, outer, outer]; mats[innerIdx] = inner;
+      const inner = new THREE.MeshStandardMaterial({ map: this.rep("wall", () => T.wallTex(), len / 4), color: "#F6C7A8", roughness: 0.78 }), mats = [outer, outer, cap, outer, outer, outer]; mats[innerIdx] = inner;
       this.box(horiz ? len : 0.3, WALL_H, horiz ? 0.3 : len, mats, cx, WALL_H / 2, cz, { outline: false, occlude: true });
     };
     wall(W + 0.6, 0, -H / 2 - 0.15, true, 4); wall(H, -W / 2 - 0.15, 0, false, 0); wall(H, W / 2 + 0.15, 0, false, 1);
@@ -214,6 +211,7 @@ export class HallScene {
     wall(g0 + W / 2 + 0.3, (-W / 2 - 0.3 + g0) / 2, sz, true, 5); wall(W / 2 + 0.3 - g1, (g1 + W / 2 + 0.3) / 2, sz, true, 5);
     this.box(g1 - g0, 0.9, 0.3, [outer, outer, cap, outer, outer, this.std(this.rep("wall", () => T.wallTex(), 2))], (g0 + g1) / 2, WALL_H - 0.45, sz, { outline: false });
     this.mountSchoolName((g0 + g1) / 2, H / 2);
+    this.card(this.tex("exit", () => T.bannerTex("WELCOME")), 5.2, 0.8, (g0 + g1) / 2, 3.2, H / 2 + 0.35, 0, true);
     this.card(this.tex("vista", () => this.vistaTex()), 2.4, 1.7, g0 - 2.2, 2.3, H / 2 - 0.2, Math.PI, true);
     this.card(this.tex("vista", () => this.vistaTex()), 2.4, 1.7, g1 + 2.2, 2.3, H / 2 - 0.2, Math.PI, true);
     this.card(this.tex("clock", () => T.clockTex()), 1.1, 1.1, -9, 3.05, -H / 2 + 0.17, 0);
@@ -241,7 +239,7 @@ export class HallScene {
     for (const [x, y] of [[4, 24], [4, 58], [104, 24], [104, 58], [28, 78], [80, 78], [28, 4], [80, 4]] as const) this.potLight(x - W / 2, y - H / 2);
 
     // layered shell: a stone pad under the tile, a raised border, then baseboard, wainscot, rail and crown on the inner walls
-    const pad = this.plain("#C0392B"), lip = this.plain("#F4F7FB"), baseM = this.plain("#1E4D8C"), railM = this.plain("#F5C518"), crownM = this.plain("#F7F4EF");
+    const pad = this.plain("#B9976A"), lip = this.plain("#E7D3A8"), baseM = this.plain("#F6E7C8"), railM = this.plain("#C56A32"), crownM = this.plain("#FFE08A");
     this.box(W + 2.6, 0.32, H + 2.6, pad, 0, -0.18, 0, { outline: false, shadow: false });
     this.box(W - 0.2, 0.05, 0.7, lip, 0, 0.028, -H / 2 + 0.55, { outline: false, shadow: false });
     this.box(W - 0.2, 0.05, 0.7, lip, 0, 0.028, H / 2 - 0.55, { outline: false, shadow: false });
@@ -314,8 +312,6 @@ export class HallScene {
     for (const g of GREENS) this.plant(g.x - W / 2, g.y - H / 2);
     this.buildLibrary();
     this.buildColumns();
-    this.buildSchoolhouse();
-    void refreshWeather();
   }
   /** a scenic panel over the front doors: sky, hills, and the school, so the entry has a view */
   private vistaTex() {
@@ -357,74 +353,11 @@ export class HallScene {
     const med2 = new THREE.Mesh(new THREE.CircleGeometry(1.5, 24), new THREE.MeshBasicMaterial({ color: "#E23B4A" }));
     med2.rotation.x = -Math.PI / 2; med2.position.set(0, 0.025, 74 - H / 2); this.scene.add(med2);
   }
-  /** the front people arrive at: two-story red brick, white columns, blue roof, cupola, like the schoolhouse photo */
-  private buildSchoolhouse() {
-    const S = this.scene, zWall = H / 2, white = this.plain("#F7F4EF"), blue = this.plain("#1E4FA3"), brick = this.brickMat(), stone = this.plain("#D9D4C8"), gold = this.plain("#F0B429"), doorC = this.plain("#8A4B24");
-    const g0 = ENTRANCE.gap.x0 - W / 2, g1 = ENTRANCE.gap.x1 - W / 2, FH = 7.25;
-    const wing = (w: number, x: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.4, w), FH, 0.32), brick); m.position.set(x, FH / 2 + 0.02, zWall + 0.48); m.castShadow = true; m.receiveShadow = true; S.add(m); };
-    wing(g0 + W / 2 - 0.2, (-W / 2 + g0) / 2); wing(W / 2 - g1 - 0.2, (g1 + W / 2) / 2);
-    const fill = new THREE.Mesh(new THREE.BoxGeometry(g1 - g0 + 0.4, 3.9, 0.32), brick); fill.position.set(0, 5.28, zWall + 0.48); fill.castShadow = true; S.add(fill);
-    // the walk-in stays a real doorway, not an 8-metre hole into the hall
-    const pier = (x: number, w: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, 3.25, 0.36), brick); m.position.set(x, 1.64, zWall + 0.5); m.castShadow = true; S.add(m); };
-    pier((g0 - 1.15) / 2, -1.15 - g0); pier((1.15 + g1) / 2, g1 - 1.15);
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(W + 0.8, 0.18, 0.46), white); belt.position.set(0, 3.62, zWall + 0.58); S.add(belt);
-    const corn = new THREE.Mesh(new THREE.BoxGeometry(W + 2.4, 0.28, 1.35), white); corn.position.set(0, 7.12, zWall + 0.95); corn.castShadow = true; S.add(corn);
-    // a real gable: front slope up to a ridge, back slope down over the upstairs so the open hall does not show
-    const front = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.28, 6.05), blue); front.position.set(0, 8.38, zWall - 1.5); front.rotation.x = 0.46; front.castShadow = true; S.add(front);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.28, 8.2), blue); back.position.set(0, 8.55, zWall - 8.1); back.rotation.x = -0.29; back.castShadow = true; S.add(back);
-    for (const s of [-1, 1]) { const q = new THREE.Mesh(new THREE.BoxGeometry(0.62, FH, 0.48), white); q.position.set(s * (W / 2 - 0.05), FH / 2, zWall + 0.62); q.castShadow = true; S.add(q); }
-    const arch = (x: number, y: number, z: number, rot: number) => {
-      const g = new THREE.Group();
-      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.22, 0.05), new THREE.MeshStandardMaterial({ color: "#7EB6FF", emissive: "#1E4FD0", emissiveIntensity: 0.45, roughness: 0.15 })); pane.position.y = 0.5; g.add(pane);
-      for (const sx of [-0.46, 0.46]) { const j = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.32, 0.1), white); j.position.set(sx, 0.5, 0); g.add(j); }
-      const mull = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.2, 0.06), white); mull.position.y = 0.5; g.add(mull);
-      const sill = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.09, 0.14), white); sill.position.set(0, -0.16, 0); g.add(sill);
-      const cap = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.065, 8, 14, Math.PI), white); cap.position.set(0, 1.1, 0); cap.rotation.z = Math.PI; g.add(cap);
-      g.position.set(x, y, z); g.rotation.y = rot; S.add(g);
-    };
-    for (const y of [2.05, 4.72]) {
-      for (let x = -W / 2 + 6; x < g0 - 2.2; x += 5.2) arch(x, y, zWall + 0.66, 0);
-      for (let x = g1 + 3.4; x < W / 2 - 4; x += 5.2) arch(x, y, zWall + 0.66, 0);
-    }
-    for (const z of [-18, -6, 8, 20]) { arch(-W / 2 - 0.22, 2.15, z, Math.PI / 2); arch(W / 2 + 0.22, 2.15, z, -Math.PI / 2); }
-    for (const x of [-3.4, -1.15, 1.15, 3.4]) {
-      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 3.55, 16), white); shaft.position.set(x, 1.95, zWall + 2.45); shaft.castShadow = true; S.add(shaft);
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.22, 0.78), stone); base.position.set(x, 0.28, zWall + 2.45); S.add(base);
-      const capC = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.18, 0.86), white); capC.position.set(x, 3.82, zWall + 2.45); S.add(capC);
-    }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.34, 1.35), white); beam.position.set(0, 4.12, zWall + 2.25); beam.castShadow = true; S.add(beam);
-    const ped = new THREE.Shape(); ped.moveTo(-4.5, 0); ped.lineTo(4.5, 0); ped.lineTo(0, 2.05);
-    const pedM = new THREE.Mesh(new THREE.ShapeGeometry(ped), white); pedM.position.set(0, 4.28, zWall + 2.62); S.add(pedM);
-    const pedRoof = new THREE.Mesh(new THREE.ShapeGeometry(ped), blue); pedRoof.position.set(0, 4.34, zWall + 2.2); pedRoof.scale.set(1.06, 1.06, 1); S.add(pedRoof);
-    const seal = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), gold); seal.position.set(0, 5.05, zWall + 2.7); S.add(seal);
-    for (let i = 0; i < 5; i++) { const step = new THREE.Mesh(new THREE.BoxGeometry(7.4 + i * 0.7, 0.16, 0.62), stone); step.position.set(0, 0.1 + i * 0.14, zWall + 3.35 + i * 0.55); step.receiveShadow = true; S.add(step); }
-    const jamb = new THREE.Mesh(new THREE.BoxGeometry(2.55, 3.15, 0.16), white); jamb.position.set(0, 1.58, zWall + 0.64); S.add(jamb);
-    for (const sx of [-0.42, 0.42]) { const door = new THREE.Mesh(new THREE.BoxGeometry(0.78, 2.45, 0.1), doorC); door.position.set(sx, 1.28, zWall + 0.72); S.add(door); const lite = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.04), new THREE.MeshStandardMaterial({ color: "#9EC6FF", emissive: "#2E6BD6", emissiveIntensity: 0.35, roughness: 0.15 })); lite.position.set(sx, 2.05, zWall + 0.78); S.add(lite); }
-    const fan = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.55, 0.06), new THREE.MeshStandardMaterial({ color: "#9EC6FF", emissive: "#2E6BD6", emissiveIntensity: 0.3, roughness: 0.15 })); fan.position.set(0, 2.95, zWall + 0.74); S.add(fan);
-    const tower = new THREE.Group();
-    const baseT = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.7, 2.3), white); baseT.position.y = 0.35; tower.add(baseT);
-    const brickBase = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.85, 1.9), brick); brickBase.position.y = 1.05; tower.add(brickBase);
-    const lan = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.45, 1.55), white); lan.position.y = 2.15; tower.add(lan);
-    for (const rot of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) { const win = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.85, 0.08), new THREE.MeshStandardMaterial({ color: "#163A9A", emissive: "#3D6BFF", emissiveIntensity: 0.45 })); win.position.set(Math.sin(rot) * 0.84, 2.2, Math.cos(rot) * 0.8); win.rotation.y = rot; tower.add(win); }
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(1.02, 28, 16, 0, Math.PI * 2, 0, Math.PI / 2), blue); dome.position.y = 2.9; tower.add(dome);
-    const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.06, 0.9, 8), gold); spire.position.y = 4.05; tower.add(spire);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), gold); ball.position.y = 4.5; tower.add(ball);
-    tower.position.set(0, 9.55, zWall - 4.15); S.add(tower);
-    const bush = (x: number, z: number, s: number) => { const b = new THREE.Mesh(new THREE.SphereGeometry(s, 18, 14), this.plain("#1B8A34")); b.scale.y = 0.62; b.position.set(x, s * 0.45, z); b.castShadow = true; S.add(b); };
-    bush(-6.4, zWall + 6.1, 1.15); bush(-8.1, zWall + 5.2, 0.78); bush(6.5, zWall + 6.2, 1.2); bush(8.3, zWall + 5.1, 0.76);
-  }
-  private brickMat() {
-    const cv = document.createElement("canvas"); cv.width = cv.height = 128; const g = cv.getContext("2d")!;
-    g.fillStyle = "#F3EFE6"; g.fillRect(0, 0, 128, 128);
-    for (let y = 0; y < 8; y++) for (let x = -1; x < 5; x++) { g.fillStyle = (x + y) % 3 === 0 ? "#C44738" : (x + y) % 3 === 1 ? "#A83228" : "#D25542"; g.fillRect(x * 32 + (y % 2) * 16 + 1, y * 16 + 1, 30, 14); }
-    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 5); t.anisotropy = 4;
-    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.7 });
-  }
   /** the second floor: library, side halls, auditorium and newsroom, finished like the ground floor */
   private buildLibrary() {
     const y0 = FLOOR_Y, wh = WALL_H;
     const gx = (x: number) => x - W / 2, gz = (y: number) => y - H / 2;
-    const wain = this.plain("#1E4D8C"), crown = this.plain("#F7F4EF"), wood = this.plain("#C0392B"), ink = this.plain("#1A2744"), cream = this.plain("#FFF3C4"), plaster = this.plain("#F4F7FB");
+    const wain = this.plain("#C46B4A"), crown = this.plain("#E8B15A"), wood = this.plain("#8d6844"), ink = this.plain("#5c4632"), cream = this.plain("#f7f1e6"), plaster = this.plain("#efe6d6");
     const slab = (r: Rect, floorCol: THREE.Material) => {
       this.box(r.w, 0.46, r.h, plaster, gx(r.x + r.w / 2), y0 - 0.28, gz(r.y + r.h / 2), { outline: false, shadow: false });
       this.box(r.w, 0.18, r.h, floorCol, gx(r.x + r.w / 2), y0 + 0.08, gz(r.y + r.h / 2), { outline: false, shadow: false });
@@ -435,7 +368,7 @@ export class HallScene {
     slab(LIBRARY, oak);
     for (const r of [WEST_HALL, EAST_HALL, NEWSROOM]) slab(r, hallTile);
     slab(AUDITORIUM, stone);
-    const cozy = this.plain("#FF7A45"), halfC = this.plain("#FFD56A");
+    const cozy = this.plain("#F6C7A8"), halfC = this.plain("#F3D2B0");
     const wall = (x: number, y: number, w: number, d: number, half = false) => {
       if (w < 0.35 || d < 0.25) return;
       const cx = gx(x + w / 2), cz = gz(y + d / 2), h = half ? 1.28 : wh * 0.92;
@@ -533,25 +466,9 @@ export class HallScene {
   }
   private windUniforms: { value: number }[] = [];
   private _leaf?: THREE.BufferGeometry;
-  private _softLeaf?: THREE.Texture;
-  private _crown?: THREE.MeshStandardMaterial;
-  /** a leaf with a soft edge, so a crown reads as foliage instead of hard cards */
-  private softLeafTex() {
-    if (this._softLeaf) return this._softLeaf;
-    const cv = document.createElement("canvas"); cv.width = cv.height = 64; const c = cv.getContext("2d")!;
-    const g = c.createRadialGradient(32, 34, 2, 32, 32, 30);
-    g.addColorStop(0, "rgba(168,214,96,0.92)"); g.addColorStop(0.45, "rgba(46,140,62,0.7)"); g.addColorStop(1, "rgba(30,90,40,0)");
-    c.fillStyle = g; c.beginPath(); c.moveTo(32, 3); c.bezierCurveTo(60, 16, 56, 46, 32, 61); c.bezierCurveTo(8, 46, 4, 16, 32, 3); c.fill();
-    c.strokeStyle = "rgba(18,70,28,0.28)"; c.lineWidth = 1.1; c.beginPath(); c.moveTo(32, 12); c.quadraticCurveTo(34, 32, 32, 52); c.stroke();
-    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; this._softLeaf = t; return t;
-  }
-  private crownMat() {
-    if (this._crown) return this._crown;
-    this._crown = this.windMat({ map: this.softLeafTex() }); return this._crown;
-  }
   /** leaves and blades sway from the tip, so the edges stay soft instead of stiff */
   private windMat(opts: { color?: string; map?: THREE.Texture } = {}) {
-    const m = new THREE.MeshStandardMaterial({ color: opts.color ?? "#ffffff", map: opts.map, roughness: 0.68, side: THREE.DoubleSide, transparent: !!opts.map, alphaTest: opts.map ? 0.04 : 0, depthWrite: !opts.map });
+    const m = new THREE.MeshStandardMaterial({ color: opts.color ?? "#ffffff", map: opts.map, roughness: 0.68, side: THREE.DoubleSide, transparent: !!opts.map, alphaTest: opts.map ? 0.18 : 0, depthWrite: !opts.map });
     const uTime = { value: 0 }; this.windUniforms.push(uTime);
     m.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = uTime;
@@ -574,15 +491,17 @@ export class HallScene {
   }
   private tree(x: number, z: number, s = 1) {
     const g = new THREE.Group(), wood = this.plain("#8A5A32");
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11 * s, 0.26 * s, 2.2 * s, 8), wood); trunk.position.y = 1.05 * s; trunk.castShadow = true; g.add(trunk);
-    const geo = new THREE.PlaneGeometry(0.7, 0.95), mat = this.crownMat();
-    for (let k = 0; k < 46; k++) {
-      const leaf = new THREE.Mesh(geo, mat);
-      const a = k * 2.399, rad = (0.12 + (k % 8) * 0.09) * s, y = (1.45 + (k % 6) * 0.2) * s;
-      leaf.position.set(Math.cos(a) * rad, y, Math.sin(a) * rad);
-      leaf.rotation.set(0.25 + (k % 4) * 0.22, a, (k % 5) * 0.15);
-      leaf.scale.setScalar(s * (0.72 + (k % 3) * 0.16)); g.add(leaf);
-    }
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.28 * s, 2.1 * s, 8), wood); trunk.position.y = 1.0 * s; trunk.castShadow = true; g.add(trunk);
+    const cols = ["#1F8A45", "#2E9B4A", "#E8833A", "#3CB371", "#C2452D", "#67B34A"];
+    [[0.1, 1.7, 0.05, 0.5], [-0.28, 1.85, -0.12, -0.6], [0.32, 2.05, -0.08, 0.7], [0, 2.3, 0.22, -0.3]].forEach(([bx, by, bz, rz], i) => {
+      const br = new THREE.Mesh(new THREE.CylinderGeometry(0.03 * s, 0.06 * s, 0.9 * s, 5), wood); br.position.set(bx * s, by * s, bz * s); br.rotation.z = rz; g.add(br);
+      for (let k = 0; k < 16; k++) {
+        const leaf = new THREE.Mesh(this.leafGeo(), this.windMat({ color: cols[(i + k) % cols.length] }));
+        const a = k * 0.55, rad = (k < 8 ? 0.18 : 0.42) * s;
+        leaf.position.set(bx * s + Math.cos(a) * rad, by * s + 0.22 * s + (k % 4) * 0.08 * s, bz * s + Math.sin(a) * rad);
+        leaf.rotation.set(0.4 + (k % 3) * 0.25, a, 0.35); leaf.scale.setScalar(s * (k < 8 ? 0.85 : 0.62 + (k % 3) * 0.12)); g.add(leaf);
+      }
+    });
     g.position.set(x, 0, z); this.scene.add(g);
   }
   private fountain(x: number, z: number) {
@@ -723,10 +642,10 @@ export class HallScene {
     const S = this.scene;
     const gt = this.rep("grass", () => T.groundTex(), 60, 60), ground = new THREE.Mesh(new THREE.PlaneGeometry(480, 480), this.std(gt)); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.04; ground.receiveShadow = true; S.add(ground);
     const bladeCv = document.createElement("canvas"); bladeCv.width = 32; bladeCv.height = 64; const bc2 = bladeCv.getContext("2d")!;
-    const fade = bc2.createLinearGradient(0, 64, 0, 0); fade.addColorStop(0, "rgba(18,78,28,0)"); fade.addColorStop(0.22, "rgba(28,100,42,0.45)"); fade.addColorStop(0.62, "rgba(62,150,58,0.72)"); fade.addColorStop(1, "rgba(210,230,120,0)");
+    const fade = bc2.createLinearGradient(0, 64, 0, 0); fade.addColorStop(0, "rgba(18,78,28,0.95)"); fade.addColorStop(0.55, "rgba(62,150,58,0.8)"); fade.addColorStop(1, "rgba(190,220,90,0)");
     bc2.fillStyle = fade; bc2.beginPath(); bc2.moveTo(16, 1); bc2.quadraticCurveTo(30, 28, 22, 63); bc2.lineTo(10, 63); bc2.quadraticCurveTo(2, 28, 16, 1); bc2.fill();
     const bladeMap = new THREE.CanvasTexture(bladeCv); bladeMap.colorSpace = THREE.SRGBColorSpace;
-    const bladeN = 2800, bladeG = new THREE.PlaneGeometry(0.22, 0.7);
+    const bladeN = 1600, bladeG = new THREE.PlaneGeometry(0.16, 0.62);
     const bladeMat = this.windMat({ map: bladeMap }); bladeMat.vertexColors = true;
     const bladeMat2 = this.windMat({ map: bladeMap }); bladeMat2.vertexColors = true;
     const blades = new THREE.InstancedMesh(bladeG, bladeMat, bladeN);
@@ -735,58 +654,38 @@ export class HallScene {
     const shades = ["#2F7A3A", "#4E9A48", "#8FCB62", "#1F6A32", "#6AAA48"];
     const roadZ = OUTSIDE.roadY - H / 2;
     for (let i = 0; i < bladeN; i++) {
-      const tuft = Math.floor(i / 7);
-      let x = (hash(tuft, 4) - 0.5) * 220 + (hash(i, 21) - 0.5) * 1.6, z = (hash(tuft, 5) - 0.5) * 180 + 8 + (hash(i, 22) - 0.5) * 1.6, sc = 0.45 + hash(i, 9) * 1.05;
+      let x = (hash(i, 4) - 0.5) * 150, z = (hash(i, 5) - 0.5) * 130 + 8, sc = 0.55 + hash(i, 9) * 1.15;
       const inBuilding = Math.abs(x) < W / 2 + 1.2 && Math.abs(z) < H / 2 + 1.2;
       if (inBuilding) { x += x < 0 ? -(W / 2 + 3) : W / 2 + 3; }
       const onRoad = Math.abs(z - roadZ) < 3.3, onWalk = Math.abs(x) < 5.5 && z > H / 2 - 0.5 && z < H / 2 + 16;
-      const inDorm = x > this.dormX - 26 && x < this.dormX + 6 && z > roadZ - 20 && z < roadZ + 2;
-      if (inDorm) { x += x < this.dormX - 10 ? -6 : 8; z -= 6; sc *= 0.7; }
       if (onRoad || onWalk) { const n = 0.6 + hash(i, 11) * 1.4; if (onRoad) z += z < roadZ ? -n : n; else x += x < 0 ? -n : n; sc *= 0.28 + hash(i, 12) * 0.35; }
       be.set(0.05 + hash(i, 6) * 0.4, hash(i, 7) * 6.28, (hash(i, 8) - 0.5) * 0.35); bq.setFromEuler(be);
       bm.compose(new THREE.Vector3(x, sc * 0.22, z), bq, new THREE.Vector3(sc, sc, sc)); blades.setMatrixAt(i, bm); blades.setColorAt(i, bcol.set(shades[i % shades.length]));
       be.y += 1.15; bq.setFromEuler(be); bm.compose(new THREE.Vector3(x, sc * 0.22, z), bq, new THREE.Vector3(sc * 0.85, sc, sc * 0.85)); blades2.setMatrixAt(i, bm); blades2.setColorAt(i, bcol);
     }
     blades.receiveShadow = blades2.receiveShadow = true; S.add(blades, blades2);
-    const tuftCv = document.createElement("canvas"); tuftCv.width = tuftCv.height = 64; const tc = tuftCv.getContext("2d")!;
-    const tg = tc.createRadialGradient(32, 36, 2, 32, 34, 30); tg.addColorStop(0, "rgba(120,180,70,0.55)"); tg.addColorStop(0.6, "rgba(50,130,55,0.28)"); tg.addColorStop(1, "rgba(40,110,50,0)");
-    tc.fillStyle = tg; tc.beginPath(); tc.ellipse(32, 36, 26, 18, 0, 0, 7); tc.fill();
-    const tuftMap = new THREE.CanvasTexture(tuftCv); tuftMap.colorSpace = THREE.SRGBColorSpace;
-    const tuftMat = this.windMat({ map: tuftMap }); tuftMat.vertexColors = true;
-    const tufts = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.15, 0.55), tuftMat, 900);
-    for (let i = 0; i < 900; i++) {
-      let x = (hash(i, 30) - 0.5) * 210, z = (hash(i, 31) - 0.5) * 170 + 8;
-      const inBuilding = Math.abs(x) < W / 2 + 1 && Math.abs(z) < H / 2 + 1;
-      const onRoad = Math.abs(z - roadZ) < 3.1, onWalk = Math.abs(x) < 5 && z > H / 2 && z < H / 2 + 16;
-      if (inBuilding || onRoad || onWalk) { x = (i % 2 ? 1 : -1) * (W / 2 + 8 + (i % 5)); z = (i % 3 - 1) * 24; }
-      be.set(-0.4, hash(i, 32) * 6.28, 0.15); bq.setFromEuler(be);
-      const sc = 0.7 + hash(i, 33) * 0.8;
-      bm.compose(new THREE.Vector3(x, 0.12, z), bq, new THREE.Vector3(sc, sc * 0.7, sc)); tufts.setMatrixAt(i, bm); tufts.setColorAt(i, bcol.set(shades[i % shades.length]));
-    }
-    S.add(tufts);
     this.flat(this.rep("stoneP", () => T.stoneTex(), 2, 8), 9, 24, 0, H / 2 + 13, -0.02);
     const disc = new THREE.Mesh(new THREE.CircleGeometry(9, 40), this.std(this.rep("stoneD", () => T.stoneTex(), 5, 5))); disc.rotation.x = -Math.PI / 2; disc.position.set(0, -0.015, H / 2 + 30); disc.receiveShadow = true; S.add(disc);
     // instanced paper trees: a trunk + a faceted crown each
     const spots: { x: number; z: number; s: number }[] = [];
     for (let i = 0; i < 900 && spots.length < 190; i++) {
-      const x = (hash(i, 1) - 0.5) * 230, z = (hash(i, 2) - 0.5) * 190 + 8;
+      const x = (hash(i, 1) - 0.5) * 150, z = (hash(i, 2) - 0.5) * 140 + 8;
       if (Math.abs(x) < W / 2 + 5 && Math.abs(z) < H / 2 + 5) continue;                   // keep clear of the building
       if (Math.abs(x) < 8 && z > H / 2 - 1 && z < H / 2 + 28) continue;
       if (z > OUTSIDE.roadY - H / 2 - 7 && z < OUTSIDE.roadY - H / 2 + 4) continue;
-      if (x > this.dormX - 26 && x < this.dormX + 6 && z > roadZ - 20 && z < roadZ + 2) continue;
       if (Math.hypot(x, z - (H / 2 + 30)) < 11) continue;
       spots.push({ x, z, s: 0.8 + hash(i, 3) * 0.9 });
     }
     const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.28, 2.0, 7), this.plain("#8A5A32"), spots.length);
-    const per = 42;
-    const leafMat = this.windMat({ map: this.softLeafTex() }); leafMat.vertexColors = true;
-    const leaves = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.85, 1.05), leafMat, spots.length * per);
+    const per = 26;
+    const leafMat = this.windMat({ color: "#ffffff" }); leafMat.vertexColors = true;
+    const leaves = new THREE.InstancedMesh(this.leafGeo(), leafMat, spots.length * per);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), leafCol = new THREE.Color();
     const greens = ["#1F8A45", "#2F9A4A", "#67B34A", "#E8833A", "#3CB371", "#C2452D", "#8FCB62"];
     spots.forEach((p, i) => {
       q.identity(); m4.compose(new THREE.Vector3(p.x, 0.95 * p.s, p.z), q, new THREE.Vector3(p.s, p.s * 1.15, p.s)); trunk.setMatrixAt(i, m4);
       for (let k = 0; k < per; k++) {
-        const inner = k < 16, a = hash(i, 20 + k) * 6.28, rad = (inner ? 0.05 + hash(i, 40 + k) * 0.45 : 0.28 + hash(i, 40 + k) * 0.7) * p.s, y = (1.35 + hash(i, 60 + k) * 1.35) * p.s;
+        const inner = k < 10, a = hash(i, 20 + k) * 6.28, rad = (inner ? 0.08 + hash(i, 40 + k) * 0.38 : 0.42 + hash(i, 40 + k) * 0.85) * p.s, y = (inner ? 1.85 + hash(i, 60 + k) * 0.7 : 1.55 + hash(i, 60 + k) * 1.55) * p.s;
         e.set(0.35 + hash(i, 70 + k), a, 0.25); q.setFromEuler(e);
         const sc = p.s * (inner ? 0.72 : 1);
         m4.compose(new THREE.Vector3(p.x + Math.cos(a) * rad, y, p.z + Math.sin(a) * rad), q, new THREE.Vector3(sc, sc, sc));
@@ -798,8 +697,6 @@ export class HallScene {
     for (const x of [-50, -40, -30, 36, 46]) this.tree(x, H / 2 + 1.8, 1.15);
     for (const x of [-46, -30, 30, 46]) this.tree(x, -H / 2 - 1.8, 1.15);
     for (const z of [-30, -16, 16, 30]) { this.tree(-W / 2 - 2.1, z, 1.15); this.tree(W / 2 + 2.1, z, 1.15); }
-    const dormLawnX = this.dormX - 16, dormLawnZ = roadZ - 22;
-    this.tree(dormLawnX - 10, dormLawnZ, 1.2); this.tree(dormLawnX + 28, dormLawnZ, 1.05); this.tree(dormLawnX + 8, dormLawnZ - 6, 1.1);
     // little paper houses and hills ringing the lawn
     const wallCols = ["#FF8A78", "#FFD15C", "#5EE0A0", "#7EC8FF", "#FFB077", "#C9A6FF"], roofCols = ["#E25B45", "#C9843A", "#3D7CC9", "#D4536A"];
     for (let i = 0; i < 26; i++) {
@@ -897,11 +794,24 @@ export class HallScene {
     addEventListener("unify:progress", () => this.refreshBoard()); setInterval(() => this.refreshBoard(), 60000);
   }
 
-  /** the school name, on the inside of the front wall. The outside is the brick schoolhouse. */
+  /** the school name as raised letters on a projecting board, not a flat sticker */
   private mountSchoolName(x: number, zWall: number) {
     const board = this.nameBoard(1);
-    board.position.set(x, 3.15, zWall - 0.55); board.rotation.y = Math.PI; this.scene.add(board);
-    this.signAt = new THREE.Vector3(x, 4.8, zWall + 2.6);
+    board.position.set(x, 5.2, zWall + 1.55);
+    this.scene.add(board);
+    const inner = this.nameBoard(0.72);
+    inner.position.set(x, 3.45, zWall - 0.2); inner.rotation.y = Math.PI; this.scene.add(inner);
+    this.signAt = board.position.clone();
+    const stone = this.plain("#F4EDE0"), brass = this.plain("#C4922A");
+    for (const sx of [-4.6, 4.6]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 4.8, 14), stone); col.position.set(x + sx, 2.4, zWall + 1.25); col.castShadow = true; this.scene.add(col);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.22, 1.2), brass); cap.position.set(x + sx, 4.9, zWall + 1.25); cap.castShadow = true; this.scene.add(cap);
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.28, 1.5), stone); lintel.position.set(x, 4.72, zWall + 1.15); lintel.castShadow = true; this.scene.add(lintel);
+    for (let i = 0; i < 3; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(9.2 - i * 0.5, 0.16, 0.85), this.plain("#D9CBB6"));
+      step.position.set(x, 0.08 + i * 0.16, zWall + 2.6 - i * 0.7); step.castShadow = true; step.receiveShadow = true; this.scene.add(step);
+    }
   }
   private letterTex(ch: string) {
     const cv = document.createElement("canvas"); cv.width = 128; cv.height = 168; const c = cv.getContext("2d")!;
@@ -982,34 +892,44 @@ export class HallScene {
   }
   private buildCommute() {
     const roadZ = OUTSIDE.roadY - H / 2, g = new THREE.Group();
-    const wall = this.plain("#F4E4C8"), roofM = this.plain("#8C4A32"), trim = this.plain("#6B3A2A"), teal = this.plain("#3E9A96");
+    const wall = this.plain("#F4E4C8"), roofM = this.plain("#8C4A32"), trim = this.plain("#6B3A2A");
     const glass = new THREE.MeshPhysicalMaterial({ color: "#cfeaf6", roughness: 0.06, metalness: 0, transparent: true, opacity: 0.45, depthWrite: false });
-    const glow = new THREE.MeshStandardMaterial({ color: "#ffe1a8", emissive: "#ffb15a", emissiveIntensity: 0.55, roughness: 0.4 });
-    const Wd = 20, Dp = 8.2, Fh = 3.05;
-    const shell = (y: number) => {
-      const back = new THREE.Mesh(new THREE.BoxGeometry(Wd, Fh, 0.28), wall); back.position.set(2.2, y + Fh / 2, -3.9); back.castShadow = true; g.add(back);
-      const left = new THREE.Mesh(new THREE.BoxGeometry(0.28, Fh, Dp), wall); left.position.set(-7.7, y + Fh / 2, 0.1); g.add(left);
-      const right = new THREE.Mesh(new THREE.BoxGeometry(0.28, Fh, Dp), wall); right.position.set(12.1, y + Fh / 2, 0.1); g.add(right);
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(Wd, 0.16, Dp), this.plain("#C4A882")); slab.position.set(2.2, y, 0.1); slab.receiveShadow = true; g.add(slab);
-    };
-    shell(0); shell(Fh); shell(Fh * 2);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(Wd + 0.6, 0.28, Dp + 0.5), roofM); roof.position.set(2.2, Fh * 3 + 0.1, 0.1); roof.castShadow = true; g.add(roof);
-    const party = new THREE.Mesh(new THREE.BoxGeometry(0.16, Fh * 3, Dp), trim); party.position.set(2.2, Fh * 1.5, 0.1); g.add(party);
-    for (let f = 0; f < 3; f++) for (const x of [-5.4, -2.2, 0.6, 4.4, 7.2, 10]) {
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.35, 0.1), trim); frame.position.set(x, f * Fh + 1.7, 4.15); g.add(frame);
-      const win = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.05, 0.06), f === 0 && x < 2 ? glow : glass); win.position.set(x, f * Fh + 1.7, 4.2); g.add(win);
+    const side = (x: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.28, 3.35, 7.8), wall); m.position.set(x, 1.68, 0.15); m.castShadow = true; g.add(m); };
+    side(-4.2); side(4.2);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(8.7, 3.35, 0.28), wall); back.position.set(0, 1.68, -3.75); back.castShadow = true; g.add(back);
+    const jamb = (x: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(2.15, 3.35, 0.28), wall); m.position.set(x, 1.68, 3.85); m.castShadow = true; g.add(m); };
+    jamb(-3.05); jamb(3.05);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.72, 0.28), wall); lintel.position.set(0, 3.0, 3.85); g.add(lintel);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.22, 8.6), roofM); roof.position.y = 3.5; roof.castShadow = true; g.add(roof);
+    const pitch = new THREE.Mesh(new THREE.ConeGeometry(6.6, 1.7, 4), roofM); pitch.position.y = 4.5; pitch.rotation.y = Math.PI / 4; pitch.castShadow = true; g.add(pitch);
+    const chim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.35, 0.5), trim); chim.position.set(2.7, 4.4, -1.5); g.add(chim);
+    for (const [x, z] of [[-4.38, -1.3], [-4.38, 1.5], [4.38, -1.3], [4.38, 1.5]] as const) {
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.28, 1.08), trim); frame.position.set(x, 1.85, z); g.add(frame);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.05, 0.86), glass); win.position.set(x, 1.85, z); g.add(win);
     }
-    const lobby = (x: number) => { const d = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.3, 0.12), this.plain("#6E8F62")); d.position.set(x, 1.2, 4.22); g.add(d); };
-    lobby(-1.1); lobby(5.4);
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(Wd - 0.4, 0.08, 0.08), teal);
-    rail.position.set(2.2, Fh + 0.9, 4.35); g.add(rail); const rail2 = rail.clone(); rail2.position.y = Fh * 2 + 0.9; g.add(rail2);
-    const porch = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.14, 1.5), this.plain("#C4A882")); porch.position.set(2.2, 0.12, 5.05); g.add(porch);
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.46), new THREE.MeshBasicMaterial({ map: T.signTex("THE DORMS", "#6B3A2A"), transparent: true }));
-    plate.position.set(2.2, Fh * 3 - 0.35, 4.28); g.add(plate);
-    const lamp = new THREE.PointLight(0xffb15a, 6, 14, 2); lamp.position.set(0, 2.2, 1.2); g.add(lamp);
+    const porch = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.14, 1.7), this.plain("#C4A882")); porch.position.set(0, 0.18, 4.8); porch.castShadow = true; g.add(porch);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.1, 0.7), this.plain("#A89070")); step.position.set(0, 0.06, 5.7); g.add(step);
+    for (const x of [-1.9, 1.9]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.5, 0.16), trim); p.position.set(x, 1.35, 5.35); g.add(p); }
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.42), new THREE.MeshBasicMaterial({ map: T.signTex("THE DORMS", "#6B3A2A"), transparent: true }));
+    plate.position.set(0, 2.55, 4.05); g.add(plate);
+    // the other half of the student duplex. An adult house stays a single cottage.
+    const ux = 8.7;
+    const sideR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 3.35, 7.8), wall); sideR.position.set(4.2 + ux, 1.68, 0.15); sideR.castShadow = true; g.add(sideR);
+    const back2 = new THREE.Mesh(new THREE.BoxGeometry(ux, 3.35, 0.28), wall); back2.position.set(4.2 + ux / 2, 1.68, -3.75); g.add(back2);
+    const jamb2 = (x: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(2.15, 3.35, 0.28), wall); m.position.set(x, 1.68, 3.85); g.add(m); };
+    jamb2(4.2 + 2.2); jamb2(4.2 + ux - 2.2);
+    const lintel2 = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.72, 0.28), wall); lintel2.position.set(4.2 + ux / 2, 3.0, 3.85); g.add(lintel2);
+    const roof2 = new THREE.Mesh(new THREE.BoxGeometry(ux + 0.4, 0.22, 8.6), roofM); roof2.position.set(4.2 + ux / 2, 3.5, 0); g.add(roof2);
+    const pitch2 = new THREE.Mesh(new THREE.ConeGeometry(5.2, 1.7, 4), roofM); pitch2.position.set(4.2 + ux / 2, 4.5, 0); pitch2.rotation.y = Math.PI / 4; g.add(pitch2);
+    for (const z of [-1.2, 1.4]) { const frame = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.28, 1.08), trim); frame.position.set(4.32 + ux, 1.85, z); g.add(frame); const win = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.05, 0.86), glass); win.position.set(4.38 + ux, 1.85, z); g.add(win); }
+    const porch2 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.14, 1.7), this.plain("#C4A882")); porch2.position.set(4.2 + ux / 2, 0.18, 4.8); g.add(porch2);
+    const door2 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.08), trim); door2.position.set(4.2 + ux / 2, 1.15, 3.85); g.add(door2);
+    const bed2 = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.32, 1.2), this.plain("#F7F1E6")); bed2.position.set(4.2 + ux - 2.2, 0.4, -1.5); g.add(bed2);
+    const quilt2 = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 1.05), this.plain("#E07A66")); quilt2.position.set(4.2 + ux - 2.2, 0.58, -1.45); g.add(quilt2);
+    const plate2 = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.36), new THREE.MeshBasicMaterial({ map: T.signTex("B", "#6B3A2A"), transparent: true })); plate2.position.set(4.2 + ux / 2, 2.5, 4.05); g.add(plate2);
     g.position.set(this.dormX - 10, 0, roadZ - 12); this.scene.add(g); this.dormHouse = g;
     const cols = ["#C23B2E", "#2F5FA8", "#E7E2D4", "#1C1C1C", "#C9842A", "#3E8B4F", "#6B5AA8", "#D4536A"];
-    const slots = [{ off: 22, rel: 0.4, dir: 1, z: -5.2 }, { off: 34, rel: 0.15, dir: 1, z: -5.3 }, { off: -18, rel: 0.25, dir: 1, z: -5.2 }, { off: -32, rel: -0.1, dir: 1, z: -5.4 }, { off: 46, rel: -6, dir: -1, z: -5.5 }, { off: -46, rel: -6, dir: -1, z: -5.4 }, { off: -58, rel: -6, dir: -1, z: -5.6 }, { off: 58, rel: -5, dir: -1, z: -5.5 }];
+    const slots = [{ off: 16, rel: 0.4, dir: 1, z: -2.45 }, { off: 28, rel: 0.15, dir: 1, z: -2.45 }, { off: -20, rel: 0.25, dir: 1, z: -2.55 }, { off: -34, rel: -0.1, dir: 1, z: -2.55 }, { off: 22, rel: -6, dir: -1, z: -2.7 }, { off: 8, rel: -6, dir: -1, z: -2.7 }, { off: -12, rel: -6, dir: -1, z: -2.85 }, { off: 36, rel: -5, dir: -1, z: -2.85 }];
     slots.forEach((s, i) => {
       const car = this.makeCar(cols[i], i);
       car.rotation.y = s.dir > 0 ? Math.PI : 0; car.position.set(this.dormX + s.off, 0, roadZ + s.z); this.scene.add(car);
@@ -1038,10 +958,8 @@ export class HallScene {
   private keepOffBus(car: THREE.Object3D) {
     const B = this.bus; if (!B || !B.visible) return;
     const dx = car.position.x - B.position.x, dz = car.position.z - B.position.z;
-    if (Math.abs(dz) < 4.8 && Math.abs(dx) < 11) {
-      car.position.z = B.position.z - 5.4;
-      car.position.x = B.position.x + (dx >= 0 ? 13 : -13);
-    }
+    if (Math.abs(dz) < 2.4 && Math.abs(dx) < 8) car.position.x = B.position.x + (dx >= 0 ? 9 : -9);
+    if (car.position.z > B.position.z - 1.6) car.position.z = B.position.z - 2.5;
   }
   private buildBus() {
     const g = new THREE.Group(), yel = this.plain("#1E7A40"), blk = this.plain("#2b2b34"), chrome = this.plain("#E7EEF2");
@@ -1052,17 +970,17 @@ export class HallScene {
     const hood = new THREE.Mesh(this.clay(2.15, 1.2, 2.35, 0.22), yel); hood.position.set(-4.5, 1.22, 0); hood.castShadow = true; g.add(hood);
     const roof = new THREE.Mesh(this.clay(8.3, 0.22, 2.3, 0.1), this.plain("#145E32")); roof.position.set(0.7, 2.9, 0); roof.castShadow = true; g.add(roof);
     const floor = new THREE.Mesh(new THREE.BoxGeometry(8.2, 0.08, 2.1), this.plain("#6b5344")); floor.position.set(0.7, 0.78, 0); g.add(floor);
-    for (let i = 0; i < 7; i++) { const seat = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.18, 0.55), this.plain(i % 2 ? "#3d4a6b" : "#2f6b4f")); seat.position.set(-2.3 + i * 0.95, 0.95, -0.45); g.add(seat); const seat2 = seat.clone(); seat2.position.z = 0.45; g.add(seat2); }
+    for (let i = 0; i < 7; i++) { const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.42, 2.05), this.plain(i % 2 ? "#3d4a6b" : "#2f6b4f")); seat.position.set(-2.3 + i * 0.95, 1.15, 0); g.add(seat); }
     const rider = (x: number, z: number, n: number) => {
       const mine = n === 0 && Social.profile?.avatar;
       const look = mine ? { ...toLook(Social.profile.avatar, 11), tag: false, sit: true } : { ...ROSTER[n % ROSTER.length].look, sit: true };
-      const tex = new THREE.CanvasTexture(bakeSheet(look as Look)); tex.colorSpace = THREE.SRGBColorSpace; tex.repeat.set(1 / COLS, 1 / DIRS.length); tex.offset.set(0, 1 - 1 / DIRS.length);
+      const tex = new THREE.CanvasTexture(bakeSheet(look as Look)); tex.colorSpace = THREE.SRGBColorSpace; tex.repeat.set(1 / COLS, 1 / DIRS.length); tex.offset.set(0, 0);
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-      const sc = 0.95 * (AGE_SCALE[(look as Look).age ?? "hs"] ?? 1);
-      sp.scale.set(sc * 0.4, sc * 0.88, 1); sp.position.set(x, 1.78, z); sp.userData.rider = 1; sp.userData.baseY = 1.78; sp.userData.bob = n; g.add(sp);
+      const sc = 0.62 * (AGE_SCALE[(look as Look).age ?? "hs"] ?? 1);
+      sp.scale.set(sc * 0.7, sc, 1); sp.position.set(x, 1.42, z); sp.userData.rider = 1; sp.userData.baseY = 1.42; sp.userData.bob = n; g.add(sp);
     };
-    for (let i = 0; i < 8; i++) { const x = -2.45 + i * 0.98; rider(x, -0.42, i); if (i % 2 === 0) rider(x, 0.42, i + 8); }
-    rider(-3.55, 0, 3);
+    for (let i = 0; i < 8; i++) { const x = -2.45 + i * 0.98; rider(x, -1.05, i); if (i % 2 === 0) rider(x, 1.05, i + 8); }
+    rider(-3.55, 0.15, 3);
     for (const sz of [-1.32, 1.32]) {
       const rail = new THREE.Mesh(new THREE.BoxGeometry(8.7, 0.1, 0.06), blk); rail.position.set(0.55, 1.35, sz); g.add(rail);
       for (let i = 0; i < 8; i++) {
@@ -1089,36 +1007,26 @@ export class HallScene {
     g.rotation.y = Math.PI; g.position.set(this.dormX, 0, OUTSIDE.busStop.y - H / 2 + 1.15); g.visible = false; this.scene.add(g); this.bus = g; this.busState = { t: 0, mode: "idle", from: this.dormX, to: stopX, span: 15, arm, door };
     this.buildDormRoom();
   }
-  /** the movie dorm, the same room as My Dorm, inside the left apartment, with a same-band roommate on the second bed */
+  /** the bedroom you wake up in: bed, then the computer with today's classes */
   private buildDormRoom() {
-    const roadZ = OUTSIDE.roadY - H / 2;
-    const layout = defaultDormLayout();
-    const lamp = layout.items.find((i) => i.uid === "d_flamp");
-    if (lamp) { lamp.x = -1.55; lamp.z = -1.35; }
-    layout.items = layout.items.filter((i) => i.uid !== "d_bean" && i.uid !== "d_cush");
-    layout.items.push({ uid: "d_matebed", def: "bed", x: 1.15, z: 0.45, rot: Math.PI, color: "#E8567C" });
-    const api = createDorm(getStyle("pixar"), layout);
-    api.setLabels(false); api.setMood({ hour: 8 });
-    const g = api.group; g.name = "movieDorm";
-    g.position.set(this.dormX - 12.7, 0.18, roadZ - 11.85);
-    g.visible = false; this.dormRoom = g; this.dormApi = api;
-    this.dormBed.copy(g.position).add(new THREE.Vector3(-0.9, 0, -0.35));
-    this.dormDesk.copy(g.position).add(new THREE.Vector3(-1.15, 0, -0.55));
-    this.dormDoor.copy(g.position).add(new THREE.Vector3(2.7, 0, 1.3));
-    rememberCurrent();
-    let selfId: string | null = null; try { selfId = (JSON.parse(localStorage.getItem("unify.family.link") || "null") as { kid?: string } | null)?.kid ?? null; } catch { /* none */ }
-    const mate = roommateFor(Social.profile?.avatar?.age || "hs", selfId);
-    const ch = createChar3D(getStyle("pixar"), mate.spec); ch.setBag("hidden"); ch.play("sit");
-    ch.root.position.set(1.15, Math.max(0, 0.46 - ch.seatHeight), 0.45); ch.root.rotation.y = 0.35; g.add(ch.root); this.mateChar = ch;
-    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: T.signTex(mate.real ? mate.name : mate.name + " · roommate", "#2F6FB5"), transparent: true, depthWrite: false }));
-    tag.scale.set(1.25, 0.32, 1); tag.position.set(1.15, 1.48, 0.45); g.add(tag);
-    const warm = new THREE.PointLight(0xffb15a, 5, 7, 2); warm.position.set(0, 2.15, 0); g.add(warm);
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.08, 5.05), this.plain("#FFF4E4")); lid.position.set(0, 2.58, 0); lid.receiveShadow = true; g.add(lid);
-  }
-  private showDormRoom() {
-    const g = this.dormRoom; if (!g) return;
-    if (!g.parent) this.scene.add(g);
-    g.visible = true;
+    const roadZ = OUTSIDE.roadY - H / 2, g = new THREE.Group();
+    const wall = this.plain("#F6E7D2"), floor = this.plain("#C4A882"), trim = this.plain("#6B3A2A");
+    const base = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.08, 6.2), floor); base.position.y = 0.04; base.receiveShadow = true; g.add(base);
+    const rug = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.02, 2.2), this.plain("#E07A66")); rug.position.set(0, 0.09, -0.4); g.add(rug);
+    const panel = (w: number, h: number, d: number, x: number, y: number, z: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wall); m.position.set(x, y, z); g.add(m); };
+    panel(7.2, 2.8, 0.12, 0, 1.4, -3.05); panel(0.12, 2.8, 6.2, -3.55, 1.4, 0); panel(0.12, 2.8, 6.2, 3.55, 1.4, 0);
+    panel(2.4, 2.8, 0.12, -2.3, 1.4, 3.05); panel(2.4, 2.8, 0.12, 2.3, 1.4, 3.05);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.3, 0.08), trim); door.position.set(-0.7, 1.15, 3.08); door.name = "dormDoor"; g.add(door);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.35, 1.3), this.plain("#F7F1E6")); bed.position.set(-1.5, 0.4, -1.7); g.add(bed);
+    const quilt = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.12, 1.15), this.plain("#9EC9E8")); quilt.position.set(-1.5, 0.6, -1.65); g.add(quilt);
+    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.4), this.plain("#fff")); pillow.position.set(-1.5, 0.72, -2.15); g.add(pillow);
+    const desk = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 0.7), this.plain("#E7D3B0")); desk.position.set(1.5, 0.5, 1.5); g.add(desk);
+    const mon = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.06), this.plain("#1C2430")); mon.position.set(1.5, 1.15, 1.25); g.add(mon);
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.78, 0.48), new THREE.MeshBasicMaterial({ color: "#F3E7CF" })); screen.position.set(1.5, 1.15, 1.29); g.add(screen);
+    g.position.set(this.dormX - 10, 0, roadZ - 12); g.visible = false; this.scene.add(g); this.dormRoom = g;
+    this.dormBed.copy(g.position).add(new THREE.Vector3(-1.5, 0, -1.5));
+    this.dormDesk.copy(g.position).add(new THREE.Vector3(1.1, 0, 0.7));
+    this.dormDoor.copy(g.position).add(new THREE.Vector3(0, 0, 4.2));
   }
   /** two family cars on the west curb, opposite the bus, so car riders are dropped off in view */
   private buildCars() {
@@ -1254,9 +1162,9 @@ export class HallScene {
     this.setAvatar(pj);
     this.player.pos.copy(this.dormBed); this.player.dir = 0; this.player.sprite.visible = true; this.player.blob.visible = true; this.arrivalHide = false;
     if (this.dormHouse) this.dormHouse.visible = true;
-    if (this.dormRoom) this.dormRoom.visible = false;
+    if (this.dormRoom) this.dormRoom.visible = true;
     this.parkBusAtDorm();
-    this.morn = "look";
+    this.morn = "wake";
   }
   paintHair(color: string) {
     const next = { ...this.playerSpec, hair: color }, p = this.player.pos.clone(), d = this.player.dir;
@@ -1314,15 +1222,6 @@ export class HallScene {
     };
   }
   private tickMorning(dt: number) {
-    if (this.morn === "look") {
-      this.mornT += dt;
-      if (this.mornT > 4.5) {
-        this.morn = "wake"; this.mornT = 0; this.showDormRoom();
-        this.yaw = 0.08; this.pitch = 0.24; this.zoom = 0.92;
-        if (this.dormHouse) this.dormHouse.visible = false;
-      }
-      return;
-    }
     if (this.morn !== "wake") return;
     this.mornT += dt; this.spin = 6.5; this.player.moving = false; this.player.frame = 0;
     if (this.mornT > 0.85 && !this.mornSwapped && this.mornDay) {
@@ -1354,39 +1253,6 @@ export class HallScene {
   }
   skipCine() { if (!this.cine && !this.arrivalHide && this.rideT < 0) return; const last = this.cine?.pts[this.cine.pts.length - 1], d = this.cine?.done; if (last) this.player.pos.copy(last); this.cine = null; this.arrivalHide = false; this.arrivalCam = false; this.signCamT = -1; this.rideT = -1; this.afterRide = null; this.onCarStopped = () => {}; this.departLine(); d?.(); }
   private departLine() { for (const c of this.cars) if (c.mode === "wait" || c.mode === "in") { c.mode = "out"; c.t = 0; } if (this.busState && this.busState.mode !== "idle") this.busState.mode = "out"; }
-  /** rain, snow, storm or fog around the bus, using today's weather */
-  private tickRideWeather() {
-    if (this.rideT < 0 || !this.bus) {
-      if (this.rideFx) this.rideFx.visible = false;
-      return;
-    }
-    const w = weatherNow().weather;
-    if (!this.rideFx || this.rideKind !== w) {
-      if (this.rideFx) { this.scene.remove(this.rideFx); this.rideFx.geometry.dispose(); (this.rideFx.material as THREE.Material).dispose(); this.rideFx = null; }
-      this.rideKind = w;
-      if (w !== "clear") {
-        const n = w === "storm" ? 840 : w === "fog" ? 180 : 480, pos = new Float32Array(n * 3);
-        for (let i = 0; i < n; i++) { pos[i * 3] = (Math.random() - 0.5) * 36; pos[i * 3 + 1] = Math.random() * 14; pos[i * 3 + 2] = (Math.random() - 0.5) * 22; }
-        const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-        const col = w === "snow" ? "#f7fbff" : w === "fog" ? "#d5dde8" : w === "cloud" ? "#e7eef6" : "#8ebfe6";
-        const mat = new THREE.PointsMaterial({ color: col, size: w === "snow" ? 0.22 : w === "fog" || w === "cloud" ? 0.55 : 0.09, transparent: true, opacity: w === "fog" || w === "cloud" ? 0.22 : 0.9, depthWrite: false });
-        this.rideFx = new THREE.Points(g, mat); this.rideFx.frustumCulled = false; this.scene.add(this.rideFx);
-      }
-    }
-    if (this.rideFx && this.bus) {
-      this.rideFx.visible = true; this.rideFx.position.copy(this.bus.position);
-      const arr = this.rideFx.geometry.attributes.position as THREE.BufferAttribute, a = arr.array as Float32Array;
-      const fall = w === "snow" ? 0.035 : w === "fog" || w === "cloud" ? 0.008 : w === "storm" ? 0.62 : 0.32, wind = w === "storm" ? 0.28 : 0.06;
-      for (let i = 0; i < a.length; i += 3) {
-        a[i] += wind; a[i + 1] -= fall;
-        if (a[i + 1] < 0.15) { a[i + 1] = 11 + Math.random() * 3; a[i] = (Math.random() - 0.5) * 36; a[i + 2] = (Math.random() - 0.5) * 22; }
-        if (a[i] > 20) a[i] = -20;
-      }
-      arr.needsUpdate = true;
-    }
-    const dim = w === "storm" ? 0.42 : w === "rain" ? 0.62 : w === "fog" ? 0.55 : w === "snow" ? 0.72 : w === "cloud" ? 0.84 : 1;
-    this.sun.intensity *= dim;
-  }
   private updateBus(dt: number) {
     const st = this.busState, B = this.bus;
     if (st && B) {
@@ -1642,56 +1508,23 @@ export class HallScene {
   /** step toward a point. Walls always win. People slide aside instead of freezing in the doorway. */
   private approach(p: Person, tx: number, tz: number, step: number, floor: number) {
     const dx = tx - p.pos.x, dz = tz - p.pos.z, len = Math.hypot(dx, dz);
-    if (len < 0.2) { (p as Person & { stuckT?: number }).stuckT = 0; return true; }
+    if (len < 0.2) return true;
     const k = Math.min(step, len) / Math.max(len, 1e-4), nx = p.pos.x + dx * k, nz = p.pos.z + dz * k;
     const climbing = this.stairTop(p.pos.x, p.pos.z) != null || this.stairTop(nx, nz) != null;
     const blocked = (x: number, z: number) => (!climbing && this.wallAt(x, z, floor)) || this.tooClose(x, z, p);
-    const who = p as Person & { stuckT?: number };
-    if (!blocked(nx, nz)) { who.stuckT = 0; p.pos.x = nx; p.pos.z = nz; return len <= step + 0.04; }
+    if (!blocked(nx, nz)) { p.pos.x = nx; p.pos.z = nz; return len <= step + 0.04; }
     const personOnly = (x: number, z: number) => (climbing || !this.wallAt(x, z, floor)) && this.tooClose(x, z, p);
     if (personOnly(nx, nz)) {
-      who.stuckT = (who.stuckT ?? 0) + 1;
-      if (who.stuckT > 18 && (climbing || !this.wallAt(nx, nz, floor))) { p.pos.x = nx; p.pos.z = nz; return false; }
       const sx = dz * 0.55, sz = -dx * 0.55;
       for (const [x, z] of [[p.pos.x + sx, p.pos.z + sz], [p.pos.x - sx, p.pos.z - sz]]) if (!this.wallAt(x, z, floor) && !this.tooClose(x, z, p)) { p.pos.x = x; p.pos.z = z; break; }
       return false;
     }
-    who.stuckT = 0;
     if (!blocked(nx, p.pos.z)) { p.pos.x = nx; return false; }
     if (!blocked(p.pos.x, nz)) { p.pos.z = nz; return false; }
     const side = ((p.id ?? 0) & 1 ? 1 : -1) * 0.16, inv = 1 / Math.max(len, 0.01);
     const ox = p.pos.x + (-dz * inv) * side, oz = p.pos.z + (dx * inv) * side;
     if (!this.wallAt(ox, oz, floor)) { p.pos.x = ox; p.pos.z = oz; }
     return false;
-  }
-  /** push overlapping people apart so they stop stacking, freezing, and flickering in doorways */
-  private separatePeople() {
-    const all = [this.monitor, this.teacher, ...this.duty, ...this.students].filter((o) => o && !(o as Stu).hidden);
-    for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
-      const a = all[i], b = all[j];
-      if (Math.abs((a.pos.y || 0) - (b.pos.y || 0)) > 2.2) continue;
-      const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d = Math.hypot(dx, dz);
-      if (d >= 0.72 || d < 1e-4) continue;
-      const push = (0.72 - d) * 0.5, nx = (dx / d) * push, nz = (dz / d) * push;
-      const fa = a.pos.y > 2.2 ? 1 : 0, fb = b.pos.y > 2.2 ? 1 : 0;
-      if (!this.wallAt(a.pos.x - nx, a.pos.z - nz, fa)) { a.pos.x -= nx; a.pos.z -= nz; }
-      if (!this.wallAt(b.pos.x + nx, b.pos.z + nz, fb)) { b.pos.x += nx; b.pos.z += nz; }
-    }
-  }
-  /** students walking the curb step around cars instead of walking into them */
-  private shoveOffCars() {
-    const people = [...this.students, this.monitor, this.teacher, ...this.duty];
-    const cars = [...this.traffic.map((t) => t.g), ...this.cars.filter((c) => c.g.visible).map((c) => c.g)];
-    for (const p of people) {
-      if (!p || (p as Stu).hidden) continue;
-      for (const c of cars) {
-        if (!c.visible) continue;
-        const dx = p.pos.x - c.position.x, dz = p.pos.z - c.position.z, d = Math.hypot(dx, dz);
-        if (d >= 2.35 || d < 1e-3) continue;
-        const k = (2.35 - d) / d, nx = p.pos.x + dx * k * 0.7, nz = p.pos.z + dz * k * 0.7, floor = p.pos.y > 2.2 ? 1 : 0;
-        if (!this.wallAt(nx, nz, floor)) { p.pos.x = nx; p.pos.z = nz; }
-      }
-    }
   }
   planNav(gxGoal: number, gyGoal: number, label: string, tail: THREE.Vector3 | null) {
     if (this.sitting != null) this.standUp();
@@ -1734,6 +1567,7 @@ export class HallScene {
       }
       else if (P.kind === "lunch") { const buddy = s.def && Social.peek(s.def.id)?.lunchBuddy && near[ni]; s.pending = { delay: rnd(0, 10), dest: buddy ? near[ni++]! : (spots[n % Math.max(1, spots.length)] || ent), hide: false, appear: s.hidden ? s.lastDoor : undefined }; }
       else if (P.kind === "arrive") {
+        { const m = momentFor(); setTimeout(() => this.onToast(`${m.icon} ${m.title}: ${m.text}`), 5000); }
         if (this.bus && this.busState && this.busState.mode === "idle") { this.bus.visible = true; this.bus.position.x = this.busState.from; this.busState.t = 0; this.busState.mode = "in"; this.busState.arm.visible = false; }
         this.kickCars();
         const carRide = n % 2 === 1, rideN = Math.floor(n / 2), stop = OUTSIDE.cars[rideN % OUTSIDE.cars.length];
@@ -1856,25 +1690,14 @@ export class HallScene {
     const P = this.player.pos, st = Math.sin(this.yaw), ct = Math.cos(this.yaw); let pos: THREE.Vector3, look: THREE.Vector3;
     const sign = this.signAt && this.signCamT >= 0 && this.signCamT < 6.4;
     const riding = this.rideT >= 0 && this.rideT < 15 && this.bus;
-    const showingYard = this.morn === "look" && this.dormHouse && this.bus;
     const inRoom = this.morn === "wake" || this.morn === "dress" || this.morn === "desk";
     const toBus = this.morn === "out" && this.bus;
-    if (showingYard && this.dormHouse && this.bus) {
-      const h = this.dormHouse.position, b = this.bus.position;
-      pos = new THREE.Vector3(b.x + 5.5, 4.4, b.z + 8); look = new THREE.Vector3((h.x + b.x) / 2 + 1, 1.8, (h.z + b.z) / 2);
-    } else if (inRoom && this.dormRoom) {
-      if (this.dormHouse) this.dormHouse.visible = false;
-      const o = this.dormRoom.position, yaw = this.yaw, pit = Math.max(0.18, Math.min(1.05, this.pitch));
-      const dist = 5.6 * Math.max(0.78, this.zoom), cp = Math.cos(pit);
-      pos = new THREE.Vector3(o.x + Math.sin(yaw) * cp * dist, o.y + 1.2 + Math.sin(pit) * dist * 0.72, o.z + Math.cos(yaw) * cp * dist);
-      look = new THREE.Vector3(o.x, o.y + 1.05, o.z - 0.15);
-    }
+    if (inRoom) { pos = new THREE.Vector3(P.x + 1.7, 2.2, P.z + 2.3); look = new THREE.Vector3(P.x, 1.2, P.z); }
     else if (toBus && this.bus) { const b = this.bus.position; pos = new THREE.Vector3((P.x + b.x) / 2 + 6, 4.2, b.z + 8); look = new THREE.Vector3(b.x, 1.7, b.z); }
     else if (riding && this.bus) {
       const b = this.bus.position, k = this.rideT / 15;
-      if (k < 0.22) { pos = new THREE.Vector3(b.x + 9.2, 2.35, b.z + 6.4); look = new THREE.Vector3(b.x + 0.6, 1.85, b.z); }
-      else if (k < 0.72) { const u = (k - 0.22) / 0.5; pos = new THREE.Vector3(b.x - 1.4 + u * 4.2, 2.25, b.z + 4.35); look = new THREE.Vector3(b.x + 0.5, 1.9, b.z); }
-      else { const u = (k - 0.72) / 0.28; pos = new THREE.Vector3(8 - u * 1.5, 3.1 + u * 2.2, H / 2 + 22 - u * 7); look = new THREE.Vector3(0, 3.4, H / 2 + 1.2); }
+      if (k < 0.8) { pos = new THREE.Vector3(b.x - 5, 3.6, b.z + 8.5); look = new THREE.Vector3(b.x + 2.5, 1.9, b.z); }
+      else { const s = this.signAt ?? b, u = (k - 0.8) / 0.2; pos = new THREE.Vector3(s.x, 1.7 + u * 0.3, (s.z || b.z) + 16 - u * 5); look = new THREE.Vector3(s.x, (this.signAt ? s.y : 4.8), s.z); }
     } else if (sign && this.signAt) {
       const k = this.signCamT / 6.4, pull = 7 + k * 16, s = this.signAt;
       pos = new THREE.Vector3(s.x + Math.sin(k * 0.6) * 1.4, 1.35 + k * 0.35, s.z + pull);
@@ -1882,12 +1705,12 @@ export class HallScene {
     } else if (this.view === "close") { const ap = this.arrivalCam, pit = this.floor === 1 ? 0.22 : ap ? 0.42 : this.pitch, d = (this.floor === 1 ? 4.4 : ap ? 11 : 9.4) * this.zoom, cp = Math.cos(pit); pos = new THREE.Vector3(P.x + st * cp * d, P.y + (this.floor === 1 ? 1.7 : 1.35) + Math.sin(pit) * d, P.z + ct * cp * d); look = new THREE.Vector3(P.x - st * 2.2, P.y + 1.45, P.z - ct * 2.2); }
     else if (this.view === "overview") { const d = Math.max(70, Math.max(W, H) * 0.92) * this.zoom, cp = Math.cos(this.pitch); pos = new THREE.Vector3(st * cp * d, P.y + Math.sin(this.pitch) * d, ct * cp * d + 3); look = new THREE.Vector3(P.x * 0.25, P.y, P.z * 0.25); }
     else { const ey = P.y + 1.7 / IS; pos = new THREE.Vector3(P.x, ey, P.z); look = new THREE.Vector3(P.x - st * 6, ey + Math.tan(this.fpitch) * 6, P.z - ct * 6); }
-    if (!inRoom && this.view !== "overview" && this.rideT < 0 && !(this.signAt && this.signCamT >= 0)) {
+    if (this.view !== "overview" && this.rideT < 0 && !(this.signAt && this.signCamT >= 0)) {
       const gx = P.x + W / 2, gy = P.z + H / 2, under = underUpper(gx, gy);
       const ceil = (this.floor === 1 ? FLOOR_Y + WALL_H : under ? FLOOR_Y : 99) - 0.7;
       if (pos.y > ceil) pos.y = ceil;
     }
-    const k = snap || showingYard || inRoom || (this.rideT >= 0 && this.rideT < 0.35) ? 1 : Math.min(1, dt * (riding ? 7 : 5)); this.camPos.lerp(pos, k); this.camLook.lerp(look, k); this.camera.position.copy(this.camPos).multiplyScalar(IS); this.camera.lookAt(this.camLook.clone().multiplyScalar(IS));
+    const k = snap || (this.rideT >= 0 && this.rideT < 0.4) ? 1 : Math.min(1, dt * 5); this.camPos.lerp(pos, k); this.camLook.lerp(look, k); this.camera.position.copy(this.camPos).multiplyScalar(IS); this.camera.lookAt(this.camLook.clone().multiplyScalar(IS));
     // sun follows the action; the shadow box widens in overview
     const R = this.rideT >= 0 ? 36 : this.view === "overview" ? 32 : 14, c = this.rideT >= 0 && this.bus ? this.bus.position : this.view === "overview" ? new THREE.Vector3(0, 0, 3) : P;
     this.sun.target.position.copy(c); if (this.px) this.sun.position.set(c.x + 11, 9, c.z + 7); else this.sun.position.set(c.x + 7, 15, c.z + 9);   // Pixar: a low golden sun
@@ -1917,8 +1740,7 @@ export class HallScene {
 
     if (parent !== window && now - this.lastClockMsg > 1000) { this.lastClockMsg = now; parent.postMessage({ type: "unify:clock", minutes: DAY_START + Math.floor(this.clock) }, "*"); }
     const idx = periodAt(this.clock); if (idx !== this.idx) { this.idx = idx; this.enterPeriod(idx); }
-    const lookOnly = this.morn === "wake" || this.morn === "dress" || this.morn === "desk";
-    const rot = (!this.inputLocked || lookOnly) ? (this.keys.e ? 1 : 0) - (this.keys.q ? 1 : 0) + this.rotate : 0; if (rot) this.yaw += rot * 1.9 * dt;
+    const rot = this.inputLocked ? 0 : (this.keys.e ? 1 : 0) - (this.keys.q ? 1 : 0) + this.rotate; if (rot) this.yaw += rot * 1.9 * dt;
     const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1); fwd.normalize();
     for (const s of this.students) {
       if (s.pending) { s.pending.delay -= sim; if (s.pending.delay <= 0) this.begin(s); }
@@ -1937,7 +1759,7 @@ export class HallScene {
         if (!s.path.length) this.afterPath(s);
       } else { s.moving = false; s.frame = 0; }
     }
-    this.patrol(sim, fwd); this.separatePeople(); this.shoveOffCars();
+    this.patrol(sim, fwd);
     for (const f of this.onTick) f(dt, sim);
     this.movePlayer(dt, fwd); this.updateBus(dt);
     if (this.doorAnim) {
@@ -1947,22 +1769,16 @@ export class HallScene {
       if (this.doorAnim.t > 1.55) { this.finishDoor(); this.doorAnim = null; }
     }
     this.updateCamera(dt);
-    if (this.dormApi && this.dormRoom?.parent) {
-      this.dormApi.setCameraPosition(this.dormRoom.worldToLocal(this.camera.position.clone()));
-      this.dormApi.update(dt); this.mateChar?.update(dt);
-    }
     this.fadeOccluders(dt);
-    const pix = !!this.px, hideBody = this.arrivalHide || this.morn === "look" || this.morn === "ride";
-    this.player.sprite.visible = !pix && this.view !== "first" && !hideBody; this.player.blob.visible = !pix && this.view !== "first" && !hideBody;
+    const pix = !!this.px;
+    this.player.sprite.visible = !pix && this.view !== "first" && !this.arrivalHide; this.player.blob.visible = !pix && this.view !== "first" && !this.arrivalHide;
     this.tickVisitors(dt);
     for (const p of [...this.students, this.player, this.monitor, this.teacher, ...this.duty, ...this.visitors.values()]) { if ((p as Stu).hidden) { p.body.visible = false; continue; } p.body.visible = false; p.sprite.position.copy(p.pos); if (pix) { p.sprite.visible = false; p.blob.visible = false; } else if (this.view === "first" && p !== this.player) { const near = p.pos.distanceTo(this.camera.position.clone().divideScalar(IS)) < 1.1; p.sprite.visible = !near; p.blob.visible = !near; } else if (p !== this.player) { p.sprite.visible = true; p.blob.visible = true; } p.blob.position.set(p.pos.x, p.pos.y + 0.02, p.pos.z); this.setFrame(p, p.dir, p.frame); this.applyBody(p, dt, p === this.player); if (!pix && this.view !== "first" && (p.look.age === "adult" || p.def?.role === "staff")) p.sprite.scale.multiplyScalar(1.55); }
     const crowd = this.px?.crowd ?? this.bodies;
     if (crowd) {
       if (this.px) this.px.tick(this.t, this.player.pos);
-      crowd.update(dt, [this.player, ...this.students, this.monitor, this.teacher, ...this.duty, ...this.visitors.values()], { player: this.player, playerSpec: this.playerSpec, camera: this.camera, shown: this.view !== "first" && !hideBody, first: this.view === "first", seat: this.sitting != null ? this.seats[this.sitting] : null, talkingTo: this.persons().find((q) => q.talking) ?? null, spin: this.spin });
-      if (pix) for (const p of [this.player, ...this.students, this.monitor, this.teacher, ...this.duty, ...this.visitors.values()]) { if (!p || (p as Stu).hidden || (p === this.player && hideBody)) continue; if (!this.px?.crowd.has(p) && !(this.bodies && this.bodies.has(p))) { p.sprite.visible = true; p.blob.visible = true; } }
+      crowd.update(dt, [this.player, ...this.students, this.monitor, this.teacher, ...this.duty, ...this.visitors.values()], { player: this.player, playerSpec: this.playerSpec, camera: this.camera, shown: this.view !== "first" && !this.arrivalHide, first: this.view === "first", seat: this.sitting != null ? this.seats[this.sitting] : null, talkingTo: this.persons().find((q) => q.talking) ?? null, spin: this.spin });
     }
-    this.tickRideWeather();
     const tg = (PERIODS[this.idx] ?? PERIODS[0])?.tint; const k = Math.min(1, dt * 1.5); if (tg) for (let i = 0; i < 4; i++) this.tint[i] += (tg[i] - this.tint[i]) * k;
     if (this.sitting != null) this.player.sprite.position.y -= 0.12;
     this.beam.update(this.t, this.camera, this.player.pos, this.view !== "first" && !this.arrivalHide, IS);
