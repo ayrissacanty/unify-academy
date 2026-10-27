@@ -1,0 +1,63 @@
+t: true }) : new THREE.MeshStandardMaterial({ map: tex, roughness: 1, transparent: true })); m.position.z = 0.02; m.receiveShadow = true;
+    g.add(sh, m); g.position.set(x, y, z); g.rotation.y = rotY; parent.add(g); return m;
+  }
+
+  /* ------------------------------------------------------------ lights */
+  private buildLights() {
+    const hemi = new THREE.HemisphereLight(0xfff6e8, 0xe4d3b4, 1.8), sun = new THREE.DirectionalLight(0xfff0d8, 1.45); sun.position.set(-7, 11, 5); sun.target.position.set(0, 0, 0); sun.castShadow = true; sun.shadow.mapSize.set(shadowSize(2048), shadowSize(2048));
+    const c = sun.shadow.camera; c.left = -13 * IS; c.right = 13 * IS; c.top = 14 * IS; c.bottom = -14 * IS; c.near = 1; c.far = 40 * IS; sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02; sun.shadow.radius = 4;
+    const spot = new THREE.SpotLight(0xfff3d6, 0, 30 * IS, Math.PI / 5, 0.55, 1.2); spot.position.set(0, 4.9, 3.2); spot.target.position.set(0, 3.0, -9.4); this.scene.add(hemi, sun, sun.target, spot, spot.target); Mood.rig({ hemi, sun, bg: this.scene.background as THREE.Color, manual: true });
+    const ceil = new THREE.MeshBasicMaterial({ color: 0xffffff }), beam = new THREE.Mesh(new THREE.ConeGeometry(3.7, 12.8, 28, 1, true), new THREE.MeshBasicMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+    beam.position.set(0, 3.9, -3.2); beam.rotation.x = -Math.PI / 2 + 0.07; beam.scale.set(1, 1, 0.6); this.scene.add(beam);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(8, 5), new THREE.MeshBasicMaterial({ color: 0x9fc7ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })); glow.position.set(0, 3.05, -9.3); this.scene.add(glow);
+    this.lights = { hemi, sun, spot, ceil, beam, glow };
+    rimLight(this.scene, 0.4, [6, 7, 12]); vignette(this.host, 0.24); aoStrips(this.scene, [{ x0: X0, z0: Z0, x1: X1, z1: Z1 }], { inward: true, width: 1.3, opacity: 0.38, y: 0.02 });   // cool rim, vignette, wall/floor occlusion
+    this.pBeam = new Beam(this.scene, Social.profile.avatar.shirt, { size: 0.9, height: 5.5 });   // light pillar over your seat
+  }
+
+  /* ------------------------------------------------------------ room shell */
+  private buildShell() {
+    const S = this.scene, wid = X1 - X0, dep = Z1 - Z0, cap = this.plain("#F7ECD6"), outer = this.plain("#D8C6A4");
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(wid, dep), Mood.tinted(this.std(this.rep("wood", () => CT.floorWood(), wid / 4, dep / 4)), "floor", 0.7)); floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, (Z0 + Z1) / 2); floor.receiveShadow = true; S.add(floor);
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(wid, dep), new THREE.MeshStandardMaterial({ map: this.rep("ceil", () => CT.ceiling(), wid / 3, dep / 3), roughness: 1 })); ceil.rotation.x = Math.PI / 2; ceil.position.set(0, WALL, (Z0 + Z1) / 2); S.add(ceil);
+    const wall = (len: number, cx: number, cz: number, horiz: boolean, innerIdx: number, key: string) => { const inner = Mood.tinted(this.std(this.rep(key, () => HT.wallTex(), len / 4, 1)), "wash", 1), mats = [outer, outer, cap, outer, outer, outer]; mats[innerIdx] = inner; this.box(horiz ? len : 0.3, WALL, horiz ? 0.3 : len, mats, cx, WALL / 2, cz, { outline: false, shadow: false }); };
+    wall(wid + 0.6, 0, Z0 - 0.15, true, 4, "wallF"); wall(wid + 0.6, 0, Z1 + 0.15, true, 5, "wallB"); wall(dep, X0 - 0.15, (Z0 + Z1) / 2, false, 0, "wallL"); wall(dep, X1 + 0.15, (Z0 + Z1) / 2, false, 1, "wallR");
+    // stage + stepped rows
+    const stageTop = this.std(this.rep("stage", () => CT.rowCarpet(), 6, 1)); this.box(wid, STAGE_H, STAGE_Z - Z0 + 0.0, [this.plain("#B98B5A"), this.plain("#B98B5A"), stageTop, this.plain("#B98B5A"), this.plain("#9A653D"), this.plain("#9A653D")], 0, STAGE_H / 2, (Z0 + STAGE_Z) / 2);
+    for (let r = 1; r < ROWS; r++) { const z = rowZ(r) - ROW_DZ / 2, d = Z1 - z; this.box(wid, rowH(r), d, [this.plain("#B8C9D6"), this.plain("#B8C9D6"), this.std(this.rep("rowc", () => CT.rowCarpet(), 6, 1)), this.plain("#8aa1b3"), this.plain("#5E7F9D"), this.plain("#5E7F9D")], 0, rowH(r) / 2, z + d / 2, { shadow: false }); }
+    // baseboards
+    for (const s of [-1, 1]) this.box(0.1, 0.22, dep, this.plain("#9A653D"), s * (wid / 2 - 0.05), 0.11, (Z0 + Z1) / 2, { outline: false, shadow: false });
+    this.box(wid, 0.22, 0.1, this.plain("#9A653D"), 0, 0.11, Z0 + 0.05, { outline: false, shadow: false });
+    // ceiling light panels + pendant lamps
+    const lm = this.lights.ceil; for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) { const p = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.1), lm); p.rotation.x = Math.PI / 2; p.position.set(-5.5 + i * 5.5, WALL - 0.02, -6 + j * 4.6); S.add(p); }
+  }
+
+  /* ------------------------------------------------------------ front of the room: boards, screen, projector, podium */
+  private buildFront() {
+    const S = this.scene, zF = Z0 + 0.06;
+    const bm = (b: Board) => { const m = new THREE.MeshBasicMaterial({ map: b.tex, toneMapped: false }); this.boardMats.push(m); return m; };
+    for (const [b, x] of [[this.boardL, -6.2], [this.boardR, 6.2]] as const) { this.box(4.0, 2.6, 0.12, this.plain("#9DA7AA"), x, 2.9, zF); const m = new THREE.Mesh(new THREE.PlaneGeometry(3.7, 2.31), bm(b)); m.position.set(x, 2.9, zF + 0.07); S.add(m); this.box(3.9, 0.12, 0.3, this.plain("#C9B28A"), x, 1.56, zF + 0.1, { outline: false }); for (let i = 0; i < 3; i++) this.box(0.28, 0.06, 0.06, this.plain(["#2a5fa8", "#c4463c", "#2f7a52"][i]), x - 1 + i * 0.4, 1.63, zF + 0.16, { outline: false, shadow: false }); }
+    // projector screen
+    this.box(6.8, 3.95, 0.16, this.plain("#313A3F"), 0, 3.05, zF); const sm = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3.6), new THREE.MeshBasicMaterial({ map: this.projector.tex, toneMapped: false })); sm.position.set(0, 3.05, zF + 0.09); S.add(sm); (this as any).screenMesh = sm;
+    this.box(7.2, 0.18, 0.28, this.plain("#9DA7AA"), 0, 5.1, zF + 0.05); for (const s of [-1, 1]) this.box(0.08, 0.8, 0.08, this.plain("#5b6a70"), s * 3.1, 4.7, zF + 0.1, { outline: false });
+    // ceiling projector
+    this.box(0.9, 0.34, 0.7, this.plain("#EDE2CF"), 0, WALL - 0.4, 3.2); const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.14, 16), new THREE.MeshBasicMaterial({ color: 0xcfe6ff })); lens.rotation.x = Math.PI / 2; lens.position.set(0, WALL - 0.4, 2.8); S.add(lens);
+    this.box(0.06, 0.4, 0.06, this.plain("#9DA7AA"), 0, WALL - 0.2, 3.2, { outline: false });
+    // teacher desk (left) and podium, flag
+    this.box(1.9, 0.08, 0.85, this.std(CT.deskTop("#C98B4D")), -3.0, STAGE_H + PROP_H.classTeacherDesk - 0.04, -7.9); for (const [dx, dz] of [[-0.85, -0.35], [0.85, -0.35], [-0.85, 0.35], [0.85, 0.35]]) this.box(0.08, 0.76, 0.08, this.plain("#9A653D"), -3.0 + dx, STAGE_H + 0.38, -7.9 + dz, { outline: false });
+    this.box(0.5, 0.04, 0.34, this.plain("#9DA7AA"), -3.4, STAGE_H + 0.84, -7.85); this.box(0.5, 0.3, 0.04, this.plain("#313A3F"), -3.4, STAGE_H + 1.02, -8.03); this.box(0.3, 0.34, 0.3, this.plain("#E07A66"), -2.4, STAGE_H + 0.99, -7.9);
+    const flag = new THREE.Group(); this.box(0.06, 3.2, 0.06, this.plain("#9DA7AA"), 0, 1.6, 0, { parent: flag, outline: false }); const fm = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7), new THREE.MeshStandardMaterial({ map: this.T("flag", () => this.flagTex()), side: THREE.DoubleSide })); fm.position.set(0.58, 2.8, 0); flag.add(fm); flag.position.set(8.2, STAGE_H, -8.6); S.add(flag);
+    // clock + banner
+    this.card(this.T("clock", () => HT.clockTex()), 0.8, 0.8, 0, 5.1, Z0 + 0.2, 0, S as any); this.card(this.T("bnr", () => CT.bannerStrip("LEARN • ASK • DISCOVER", "#E07A66")), 4.6, 0.58, -6.2, 4.52, Z0 + 0.12, 0, S as any);
+    // spotlight pools of paper on the stage floor
+    const rug = new THREE.Mesh(new THREE.PlaneGeometry(7.6, 2.8), this.std(this.rep("carpet", () => CT.carpet(), 3, 1))); rug.rotation.x = -Math.PI / 2; rug.position.set(0, STAGE_H + 0.012, -7.0); rug.receiveShadow = true; S.add(rug);
+  }
+  private flagTex() { const cv = document.createElement("canvas"); cv.width = 256; cv.height = 160; const c = cv.getContext("2d")!; for (let i = 0; i < 7; i++) { c.fillStyle = i % 2 ? "#fff" : "#D9564A"; c.fillRect(0, i * 23, 256, 23); } c.fillStyle = "#2b3a55"; c.fillRect(0, 0, 110, 92); c.fillStyle = "#fff"; for (let i = 0; i < 12; i++) { c.beginPath(); c.arc(16 + (i % 4) * 26, 18 + Math.floor(i / 4) * 26, 5, 0, 7); c.fill(); } const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t; }
+
+  /* ------------------------------------------------------------ desks, chairs and the seated people */
+  private buildSeats() {
+    const n = ROWS * COLS, pxl = isPixar(), deskG = pxl ? new RoundedBoxGeometry(1.34, 0.1, 0.7, 4, 0.045) : new RoundedBoxGeometry(1.3, 0.07, 0.66, 2, 0.025), legG = pxl ? new RoundedBoxGeometry(1.2, 0.7, 0.1, 3, 0.04) : new THREE.BoxGeometry(1.2, 0.7, 0.06), chairG = pxl ? new RoundedBoxGeometry(0.66, 0.1, 0.58, 4, 0.05) : new RoundedBoxGeometry(0.62, 0.07, 0.55, 2, 0.028), backG = pxl ? new RoundedBoxGeometry(0.66, 0.52, 0.1, 4, 0.05) : new RoundedBoxGeometry(0.62, 0.5, 0.06, 2, 0.028);
+    const desks = this.desks = new THREE.InstancedMesh(deskG, this.std(CT.deskTop("#D9A86B")), n), legs = new THREE.InstancedMesh(legG, this.plain("#9A653D"), n), seatM = new THREE.InstancedMesh(chairG, this.plain("#4F91C7"), n), backM = new THREE.InstancedMesh(backG, this.plain("#4F91C7"), n);
+    const m4 = new THREE.Matrix4(), cols = ["#4F91C7", "#E07A66", "#88B89A", "#EAB94E"]; let i = 0;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++, i++) {
+      const x = XS[c], z = rowZ(r), y = rowH(r), col = new THREE.Color(cols[(r + c) % 4]);

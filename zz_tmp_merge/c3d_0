@@ -1,0 +1,89 @@
+/** The straight-on 3D classroom: a real room (not isometric) with decor, two boards, a projector screen, 48 unique seated classmates, a teacher who walks anywhere,
+ *  and a camera director (wide, follow, board, projector close-up with dimmed lights and a spotlight, your seat, free orbit). */
+import * as THREE from "three";
+import { Beam } from "../shared/beam";
+import { dprCap, shadowSize, vignette, rimLight, aoStrips, smallScreen } from "../shared/polish";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { astar } from "../hall3d/logic";
+import { ROSTER, TEACHER_BY_SUBJECT, type NpcDef } from "../hall3d/roster";
+import { Social } from "../hall3d/social";
+import { toLook } from "../hall3d/avatar";
+import * as HT from "../hall3d/textures";
+import * as CT from "./tex";
+import { Board } from "./board";
+import { Projector } from "./projector";
+import { drawPicFinal, picsFor, picTitle } from "../game/wallart";
+import { makeBillboard, setPose, dirIndex, placeBody, SEAT, SEAT_POSES, TEACH, TEACH_POSES, GESTURE, emoPose, type Billboard } from "./sprites";
+import { personaOf, type Persona, type Emotion, type Reaction } from "./persona";
+import { voice } from "./voice";
+import { drawBoard } from "../game/timesui";
+import { FACULTY_BY_ID } from "../hall3d/faculty";
+import type { Subject } from "../game/types";
+import { Mood, Gfx } from "../hall3d/mood";
+import { buildClassExtras } from "./extras";
+import { isPixar } from "../shared/look";
+import { INTERIOR_SCALE as IS, PROP_H, scaleScene } from "../shared/scale";
+import { setupPixarClass, type ClassPx } from "./pixarClass";
+import type { Char3DEx } from "../dorm/char3d";
+import { ClassPet } from "./pet";
+
+export const X0 = -9, X1 = 9, Z0 = -9.5, Z1 = 9.5, WALL = 5.4, STAGE_H = 0.3, STAGE_Z = -6.3;
+export const ROWS = 6, COLS = 8, ROW_DZ = 1.95, ROW_Z0 = -3.6, XS = [-7.6, -5.7, -3.8, -1.9, 1.9, 3.8, 5.7, 7.6];
+const rowH = (r: number) => 0.14 * r, rowZ = (r: number) => ROW_Z0 + r * ROW_DZ;
+const sstep = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+/** floor height at depth z (stage at the front, stepped rows behind) */
+export function groundY(z: number) {
+  let h = STAGE_H * (1 - sstep(STAGE_Z, STAGE_Z + 0.5, z)); const b0 = ROW_Z0 - ROW_DZ / 2;
+  for (let r = 1; r < ROWS; r++) h += 0.14 * sstep(b0 + r * ROW_DZ - 0.25, b0 + r * ROW_DZ + 0.25, z);
+  return h;
+}
+const shade2 = (h: string) => { const n = parseInt(h.slice(1, 7), 16), f = (v: number) => Math.round(v * 0.82); return "#" + [f((n >> 16) & 255), f((n >> 8) & 255), f(n & 255)].map((v) => v.toString(16).padStart(2, "0")).join(""); };
+export type CamMode = "wide" | "follow" | "board-left" | "board-right" | "screen" | "seat" | "free" | "demo" | "bulletin";
+export const SPOTS: Record<string, { x: number; z: number; face?: [number, number] }> = {
+  podium: { x: -2.9, z: -5.5, face: [0, 1] }, center: { x: 0, z: -5.2, face: [0, 1] }, screenL: { x: -4.7, z: -7.6, face: [1, -0.1] }, screenR: { x: 4.1, z: -7.6, face: [-1, -0.1] },
+  boardL: { x: -6.2, z: -8.4, face: [0, -1] }, boardR: { x: 6.2, z: -8.4, face: [0, -1] }, demo: { x: 3.6, z: -5.2, face: [0, 1] }, aisleC: { x: 0, z: -2.4, face: [0, 1] }, aisleL: { x: -8.35, z: 0.2 }, aisleR: { x: 8.35, z: 0.2 },
+  mid: { x: 0, z: 1.0, face: [0, 1] }, midL: { x: -4.7, z: 1.1 }, midR: { x: 4.7, z: 1.1 }, back: { x: 0, z: 7.8, face: [0, -1] },
+};
+export interface Seat { c3?: Char3DEx; r: number; c: number; x: number; z: number; y: number; bb: Billboard; def: NpcDef | null; hand: 0 | 1 | 2; handT: number; act: number; actT: number; player: boolean }
+interface TeacherState { bb: Billboard; pos: THREE.Vector3; path: { x: number; z: number }[]; face: THREE.Vector3; speed: number; talking: boolean; mode: "idle" | "point" | "write" | "present" | "hold"; res: (() => void) | null; walkPh: number; faceTo: THREE.Vector3 | null; moving: boolean; def: NpcDef; persona: Persona; emo: { e: Emotion; g: string | null; until: number } | null; idle: string; sig: string | null; base: THREE.Vector3; gest: string | null; gestUntil: number; gestT: number; wrongs: number }
+
+export class Classroom3D {
+  renderer: THREE.WebGLRenderer; scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(58, 1, 0.1, 80 * IS);
+  boardL = new Board("left"); boardR = new Board("right"); projector = new Projector();
+  seats: Seat[] = []; teacher!: TeacherState; subject: Subject = "math"; playerSeat!: Seat;
+  mode: CamMode = "wide"; auto = true; dim = 0; private dimT = 0; yaw = 0; pitch = 0; free = { yaw: 0.0, pitch: 0.28, dist: 14 }; screenK = 0; screenRate = 0;
+  onTapStudent: (d: NpcDef) => void = () => {}; onTapTeacher: () => void = () => {}; onTapDemo: () => void = () => {}; onTapPic: (pid: string) => void = () => {}; onHover: (s: string | null, x: number, y: number) => void = () => {};
+  inputLocked = false; keys: Record<string, boolean> = {};
+  private blobTex = HT.blobTex(); private nav: string[] = []; private cell = 0.25; private nx = 0; private nz = 0;
+  private camPos = new THREE.Vector3(0, 3.5, 8.6); private camLook = new THREE.Vector3(0, 2.5, -9); private camFov = 58;
+  private pBeam!: Beam; private lights!: { hemi: THREE.HemisphereLight; sun: THREE.DirectionalLight; spot: THREE.SpotLight; ceil: THREE.MeshBasicMaterial; beam: THREE.Mesh; glow: THREE.Mesh };
+  private decor = new THREE.Group(); private demo = new THREE.Group(); private demoModel: THREE.Object3D | null = null; private demoMatClones: THREE.Material[] = [];
+  private boardMats: THREE.MeshBasicMaterial[] = []; private t = 0; private last = performance.now(); private raycaster = new THREE.Raycaster(); private hoverT = 0; private tex = new Map<string, THREE.Texture>();
+  private pet!: ClassPet; private fx!: { tick(t: number): void }; private tod = Mood.realTod(); private todT = 0; private todParam = Mood.queryTod();
+  private px: ClassPx | null = null; private desks!: THREE.InstancedMesh; private pointer = { x: 0, y: 0, down: false, sx: 0, sy: 0, st: 0 };
+
+  constructor(public host: HTMLElement) {
+    const phone = smallScreen();
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: !phone, alpha: false, powerPreference: phone ? "low-power" : "high-performance" }); r.setPixelRatio(dprCap()); r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.outputColorSpace = THREE.SRGBColorSpace;
+    scaleScene(this.scene); host.appendChild(r.domElement); this.scene.background = new THREE.Color("#EADFCB");
+    this.buildLights(); this.buildShell(); this.buildFront(); this.buildSeats(); this.buildStaticDecor(); this.buildDetails(); this.fx = buildClassExtras(this.scene, { X0, X1, Z0, Z1, WALL, groundY, rowH, rowZ, ROWS, XS, ceilPanels: [0, 1, 2].flatMap((i) => [0, 1, 2, 3].map((j) => [-5.5 + i * 5.5, -6 + j * 4.6] as [number, number])) }); this.scene.add(this.decor, this.demo); this.buildNav(); this.buildTeacher(TEACHER_BY_SUBJECT.math); this.pet = new ClassPet(this.scene, { x: -8.0, z: -8.4, w: 1.5, d: 1.3, y: STAGE_H });
+    if (isPixar()) { this.px = setupPixarClass(this, { X0, X1, Z0, Z1, WALL, STAGE_H, groundY, rowH, rowZ }, this.lights as any); this.px.refresh(this.scene); }
+    else this.px = setupPixarClass(this, { X0, X1, Z0, Z1, WALL, STAGE_H, groundY, rowH, rowZ }, this.lights as any, true);
+    this.px.syncTeacher();
+    this.bindInput(r.domElement); addEventListener("resize", () => this.resize()); this.resize(); this.snapCamera(); requestAnimationFrame(this.frame);
+  }
+  private T<K extends string>(key: K, make: () => THREE.Texture) { let t = this.tex.get(key); if (!t) { t = make(); this.tex.set(key, t); } return t; }
+  private rep(key: string, make: () => THREE.Texture, rx: number, ry: number) { const k = `${key}@${rx}x${ry}`; let t = this.tex.get(k); if (!t) { t = this.T(key, make).clone(); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.needsUpdate = true; this.tex.set(k, t); } return t; }
+  resize() { const w = this.host.clientWidth || innerWidth, h = this.host.clientHeight || innerHeight; this.renderer.setSize(w, h); this.px?.resize(w, h); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
+
+  /* ------------------------------------------------------------ materials + helpers */
+  private std(map: THREE.Texture | null, color = "#ffffff") { return new THREE.MeshStandardMaterial({ map, color, roughness: 0.95, metalness: 0 }); }
+  private plain(c: string) { return new THREE.MeshStandardMaterial({ color: c, roughness: 1 }); }
+  private box(w: number, h: number, d: number, mat: THREE.Material | THREE.Material[], x: number, y: number, z: number, o: { outline?: boolean; shadow?: boolean; parent?: THREE.Object3D } = {}) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = o.shadow ?? true; m.receiveShadow = true; (o.parent ?? this.scene).add(m);
+    if (o.outline !== false) m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: 0x6d5a5f, transparent: true, opacity: 0.5 }))); return m;
+  }
+  /** flat paper card on a wall: rotY 0 faces +z (front wall), PI/2 faces +x (left wall), -PI/2 faces -x (right wall), PI faces -z (back wall) */
+  private card(tex: THREE.Texture, w: number, h: number, x: number, y: number, z: number, rotY: number, parent: THREE.Object3D = this.decor, basic = false) {
+    const g = new THREE.Group(), sh = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.1, h * 1.1), new THREE.MeshBasicMaterial({ map: this.T("cardsh", () => HT.cardShadowTex()), transparent: true, opacity: 0.5, depthWrite: false }));
+    sh.position.set(0.03, -0.05, 0); const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), basic ? new THREE.MeshBasicMaterial({ map: tex, transparen
