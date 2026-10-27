@@ -45,7 +45,7 @@ function start() {
   root = E("div", "", document.body); root.id = "fam"; panel = E("div", "fm-p", root); root.addEventListener("keydown", (e) => e.stopPropagation()); root.addEventListener("click", (e) => { if (e.target === root && (USER || lget().mode)) close(); });
   const nav = document.querySelector("nav"), phone = document.getElementById("tPhone"); btn = E("button", "") as HTMLButtonElement; btn.id = "tFam"; if (nav && phone) nav.insertBefore(btn, phone.nextSibling); else document.body.appendChild(btn); btn.onclick = () => { if (USER && role() === "kid" && activeKid) void kidHome(); else if (USER && !role()) void checkin(); else open(); };
   activeKid = lget().mode === "family" ? lget().kid ?? null : null; paintBtn();
-  if (!(window as any).__SUPABASE && !(window as any).__FAMILY_BACKEND) { btn.textContent = parentGrade() == null ? "\u{1F46A} Set grade" : `\u{1F46A} Grade ${parentGrade() === 0 ? "K" : parentGrade()}`; btn.onclick = () => localGrade(); return; }       // no cloud: the account holder still sets the grade on this device
+  if (!(window as any).__SUPABASE && !(window as any).__FAMILY_BACKEND) { btn.textContent = parentGrade() == null ? "👪 Set grade" : `👪 Grade ${parentGrade() === 0 ? "K" : parentGrade()}`; btn.onclick = () => localGrade(); return; }       // no cloud: the account holder still sets the grade on this device
   B = (window as any).__FAMILY_BACKEND ?? supabaseBackend();
   B.onUser(async (u) => {
     if (kidSigningIn) return;
