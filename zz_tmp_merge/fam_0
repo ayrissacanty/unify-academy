@@ -1,0 +1,79 @@
+/** Family accounts. A PARENT signs up (email + password); children are profiles under the parent (a nickname, a grade band and a 4-digit PIN).
+ *  Children never give an email address. The parent signs in once on a device; kids then pick their profile and type their PIN, and their progress,
+ *  avatar, grades and phone data follow them to any device the parent signs in on. Guests can still play with nothing saved online.
+ *  Locker PHOTOS never leave the device. The backend is swappable (window.__FAMILY_BACKEND) so the whole flow can be tested without a cloud back end. */
+import { gradesFromState } from "../src/hall3d/lockerui";
+import { isMainAccount, parentGrade, setParentGrade } from "../src/class3d/gradeband";
+import { SUBJECT_NAME } from "../src/game/progress";
+
+interface User { uid: string; email: string | null; verified: boolean }
+interface KidDoc { id: string; name: string; age: string; salt: string; hash: string; created: number; color?: string; icon?: string; grade?: number; login_email?: string | null }
+/** what a child's own sign-in resolves to: the family it belongs to and the one child row it may see */
+interface KidSession { family: string; kid: KidDoc }
+/** the parent/family profile, stored on the family document itself */
+interface Profile { family: string; name: string; role: string; color: string; salt?: string; hash?: string; updated: number }
+interface Backend {
+  onUser(cb: (u: User | null) => void): void; signUp(e: string, p: string): Promise<User>; signIn(e: string, p: string): Promise<User>; reset(e: string): Promise<void>; signOut(): Promise<void>; verifyEmail(): Promise<void>;
+  profile(uid: string): Promise<Profile | null>; saveProfile(uid: string, p: Profile): Promise<void>;
+  kids(uid: string): Promise<KidDoc[]>; saveKid(uid: string, k: KidDoc): Promise<void>; deleteKid(uid: string, id: string): Promise<void>;
+  getData(uid: string, kid: string, key: string): Promise<{ json: string; at: number } | null>; setData(uid: string, kid: string, key: string, json: string, at: number): Promise<void>; deleteAccount(uid: string): Promise<void>;
+  /** classmate showcases: this child's row (or null), an upsert of any of its fields, and every visible showcase at school */
+  getShowcase?(uid: string, kid: string): Promise<{ visible: boolean } | null>; setShowcase?(uid: string, kid: string, row: { name?: string; json?: string; visible?: boolean }): Promise<void>; showcases?(): Promise<{ key: string; name: string; json: string }[]>;
+  /** optional: a child's own sign-in (rpc kid_login_*, my_kid_login) and the parent's chat switches on net_users */
+  createKidLogin?(kid: string, local: string, password: string): Promise<string>; setKidPassword?(kid: string, password: string): Promise<void>; removeKidLogin?(kid: string): Promise<void>;
+  signInKid?(email: string, password: string): Promise<KidSession>; kidLogin?(): Promise<KidSession | null>;
+  getNet?(uid: string, kid: string): Promise<{ open: boolean; visible: boolean } | null>; setNet?(uid: string, kid: string, patch: { open?: boolean; visible?: boolean }): Promise<void>;
+}
+const SYNC = ["unify.social.v1", "unify.progress.v1", "unify.curapp.v1", "unify.locker.v1", "unify.assess.on", "flip.chats", "flip.unread", "flip.reminders", "flip.events", "flip.homework", "unify.opendoor.v1", "unify.dorm.v1", "unify.pet.v1", "unify.quests.v1", "unify.dormrewards.v1"];
+const FKEY = "unify.family.v1", GUEST_BACKUP = "unify.guest.backup.v1", STASH = "unify.locker.pics.";
+interface Local { mode?: "guest" | "family"; kid?: string; kidName?: string }
+const lget = (): Local => { try { return JSON.parse(localStorage.getItem(FKEY) || "{}"); } catch { return {}; } };
+const lset = (v: Local) => { try { localStorage.setItem(FKEY, JSON.stringify(v)); } catch { /* private mode */ } };
+const sdoc = (k: string) => k.replace(/\./g, "_");
+
+/* ---------------- Supabase backend (supabase-js loads from the CDN only when needed) ---------------- */
+function supabaseBackend(): Backend {
+  const cl = (): Promise<any> => (window as any).__supa();
+  const U = (u: any): User => ({ uid: u.id, email: u.email ?? null, verified: !!u.email_confirmed_at });
+  const fail = (e: any): never => { const err: any = new Error(e?.message || "Something went wrong"); err.code = e?.code || e?.error_code || e?.message; throw err; };
+  const ok = <T,>(r: { data: T; error: any }): T => { if (r.error) fail(r.error); return r.data; };
+  return {
+    onUser(cb) { cl().then((c) => { c.auth.onAuthStateChange((_ev: string, s: any) => cb(s?.user && !s.user.is_anonymous ? U(s.user) : null)); }).catch(() => cb(null)); },
+    async signUp(e, p) { const c = await cl(); const r = await c.auth.signUp({ email: e, password: p, options: { emailRedirectTo: location.origin + location.pathname } }); if (r.error) fail(r.error); if (!r.data.session) { const err: any = new Error("Check your email to confirm, then sign in."); err.code = "confirm-email"; throw err; } return U(r.data.user); },
+    async signIn(e, p) { const c = await cl(); const r = await c.auth.signInWithPassword({ email: e, password: p }); if (r.error) fail(r.error); return U(r.data.user); },
+    async reset(e) { const c = await cl(); ok(await c.auth.resetPasswordForEmail(e, { redirectTo: location.origin + location.pathname })); },
+    async signOut() { const c = await cl(); await c.auth.signOut(); },
+    async verifyEmail() { const c = await cl(); const u = (await c.auth.getUser()).data.user; if (u?.email) ok(await c.auth.resend({ type: "signup", email: u.email })); },
+    async profile(uid) { const c = await cl(); const r = ok(await c.from("families").select("profile").eq("uid", uid).maybeSingle()) as any; return r?.profile ?? null; },
+    async saveProfile(uid, p) { const c = await cl(); ok(await c.from("families").upsert({ uid, profile: p, updated_at: new Date().toISOString() })); },
+    async kids(uid) { const c = await cl(); const r = ok(await c.from("kids").select("*").eq("family", uid).order("created")) as any[]; return r.map(({ family: _f, ...k }) => k as KidDoc); },
+    async saveKid(uid, k) {
+      const c = await cl(); ok(await c.from("families").upsert({ uid })); const { login_email: _l, ...row } = k;      // login_email is set by the server only
+      let r = await c.from("kids").upsert({ family: uid, ...row });
+      if (r.error && (r.error.code === "42703" || r.error.code === "PGRST204" || /grade/i.test(r.error.message || ""))) { const { grade: _g, ...old } = row; r = await c.from("kids").upsert({ family: uid, ...old }); }   // before the migration: no grade column yet
+      ok(r);
+    },
+    async deleteKid(uid, id) { const c = await cl(); ok(await c.from("kids").delete().eq("family", uid).eq("id", id)); },
+    async getData(uid, kid, key) { const c = await cl(); const r = ok(await c.from("kid_data").select("json,at").eq("family", uid).eq("kid", kid).eq("key", key).maybeSingle()) as any; return r ? { json: r.json, at: Number(r.at) } : null; },
+    async setData(uid, kid, key, json, at) { const c = await cl(); ok(await c.from("kid_data").upsert({ family: uid, kid, key, json, at })); },
+    async getShowcase(uid, kid) { const c = await cl(); const r = ok(await c.from("showcases").select("visible").eq("family", uid).eq("kid", kid).maybeSingle()) as any; return r ? { visible: !!r.visible } : null; },
+    async setShowcase(uid, kid, row) { const c = await cl(); ok(await c.from("showcases").upsert({ family: uid, kid, ...row })); },
+    async showcases() { const c = await cl(); const r = ok(await c.from("showcases").select("family,kid,name,json").eq("visible", true).neq("json", "")) as any[]; return r.map((x) => ({ key: x.family + "/" + x.kid, name: x.name, json: x.json })); },
+    async createKidLogin(kid, local, password) { const c = await cl(); return ok(await c.rpc("kid_login_create", { p_kid: kid, p_local: local, p_password: password })) as string; },
+    async setKidPassword(kid, password) { const c = await cl(); ok(await c.rpc("kid_login_password", { p_kid: kid, p_password: password })); },
+    async removeKidLogin(kid) { const c = await cl(); ok(await c.rpc("kid_login_remove", { p_kid: kid })); },
+    async kidLogin() { const c = await cl(); const r = ok(await c.rpc("my_kid_login")) as any[] | null; const x = r?.[0]; return x ? { family: x.family, kid: { id: x.kid, name: x.name, age: x.age, grade: x.grade ?? undefined, color: x.color ?? undefined, icon: x.icon ?? undefined, login_email: x.email, salt: "", hash: "", created: 0 } } : null; },
+    async signInKid(email, password) {
+      const c = await cl(); const r = await c.auth.signInWithPassword({ email, password }); if (r.error) fail(r.error);
+      const s = await (this as Backend).kidLogin!(); if (!s) { await c.auth.signOut(); const err: any = new Error("not a student"); err.code = "not-kid"; throw err; } return s;
+    },
+    async getNet(uid, kid) { const c = await cl(); const r = ok(await c.from("net_users").select("open,visible").eq("id", `${uid}_${kid}`).maybeSingle()) as any; return r ? { open: !!r.open, visible: r.visible !== false } : null; },
+    async setNet(uid, kid, patch) { const c = await cl(); ok(await c.from("net_users").update(patch).eq("id", `${uid}_${kid}`)); },
+    /** removes the family, children and any people-network profiles. (The sign-in itself can be removed by the owner in the Supabase dashboard.) */
+    async deleteAccount(uid) { const c = await cl(); ok(await c.from("net_users").delete().eq("owner", uid)); ok(await c.from("phone_state").delete().eq("uid", uid)); ok(await c.from("families").delete().eq("uid", uid)); await c.auth.signOut(); },
+  };
+}
+
+/* ---------------- state helpers ---------------- */
+const readKey = (k: string): string | null => { try { return localStorage.getItem(k); } catch { return null; } };
+const writeKey = (k: string, v: string | null) =
