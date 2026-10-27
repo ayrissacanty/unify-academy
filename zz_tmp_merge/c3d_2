@@ -1,0 +1,62 @@
+m4.makeTranslation(x, y + PROP_H.deskTop - (pxl ? 0.05 : 0.035), z - 0.38); desks.setMatrixAt(i, m4); m4.makeTranslation(x, y + 0.35, z - 0.62); legs.setMatrixAt(i, m4);
+      m4.makeTranslation(x, y + 0.42, z + 0.3); seatM.setMatrixAt(i, m4); seatM.setColorAt(i, col); m4.makeTranslation(x, y + 0.7, z + 0.58); backM.setMatrixAt(i, m4); backM.setColorAt(i, col);
+      const bb = makeBillboard(this.scene, { id: i, skin: "#f0c29b", hair: "#3a2a30", style: "crop", shirt: "#4f91c7" } as any, SEAT_POSES, this.blobTex); bb.sprite.visible = false; bb.blob.visible = false;
+      this.seats.push({ r, c, x, z: z + 0.3, y: y + 0.44, bb, def: null, hand: 0, handT: 0, act: 0, actT: Math.random() * 4, player: false });
+    }
+    for (const m of [desks, legs, seatM, backM]) { m.castShadow = true; m.receiveShadow = true; this.scene.add(m); }
+    this.playerSeat = this.seats[3 * COLS + 3]; this.playerSeat.player = true;
+  }
+  /** seat everyone: the player at a front-ish seat and the class (attendees first, then the rest of the roster) around them */
+  assign(attendees: number[] = []) {
+    const pool = [...attendees.map((id) => ROSTER[id]).filter(Boolean), ...ROSTER.filter((d) => !attendees.includes(d.id))]; let k = 0;
+    for (const s of this.seats) {
+      this.disposeBB(s.bb);
+      if (s.player) { s.def = null; s.bb = this.mkSeatBB(s, { ...toLook(Social.profile.avatar, 11), tag: false }); }
+      else { const d = pool[k++ % pool.length]; s.def = d; s.bb = this.mkSeatBB(s, d.look); }
+      s.hand = 0; s.act = 0;
+    }
+    this.px?.syncSeats();
+  }
+  private mkSeatBB(s: Seat, look: any) { const bb = makeBillboard(this.scene, look, SEAT_POSES, this.blobTex); bb.sprite.position.set(s.x, s.y, s.z); bb.blob.position.set(s.x, s.y - 0.38, s.z + 0.05); bb.blob.scale.set(0.9, 0.9, 1); return bb; }
+  private disposeBB(b: Billboard) { this.scene.remove(b.sprite, b.blob); b.tex.dispose(); b.mat.dispose(); (b.blob.material as THREE.Material).dispose(); }
+  rebuildPlayer() { const s = this.playerSeat; this.pBeam.setColor(Social.profile.avatar.shirt); this.disposeBB(s.bb); s.bb = this.mkSeatBB(s, { ...toLook(Social.profile.avatar, 11), tag: false }); this.px?.syncSeats(); }
+  setHand(npcId: number, up: boolean) { const s = this.seats.find((x) => x.def?.id === npcId); if (s) { s.hand = up ? 1 : 0; s.handT = 0; } }
+  setPlayerHand(up: boolean) { this.playerSeat.hand = up ? 1 : 0; this.playerSeat.handT = 0; }
+  seatedDefs(): NpcDef[] { return this.seats.filter((s) => s.def).map((s) => s.def!); }
+  seatOf(id: number) { return this.seats.find((s) => s.def?.id === id); }
+
+  /* ------------------------------------------------------------ decor */
+  private buildStaticDecor() {
+    const S = this.scene, G = this.decor; const winT = this.T("win", () => HT.windowTex());
+    // windows (left wall) and posters (right wall), bunting, lanterns
+    for (const z of [-6.4, 7.9]) { Mood.window(this.card(winT, 1.9, 2.4, X0 + 0.17, 2.95, z, Math.PI / 2, S as any).material as THREE.MeshStandardMaterial); }
+    this.buildBoard();
+    [[-1.9, 2.3], [-0.5, 2.0], [1.0, 2.5]].forEach(([z, y], i) => this.card(this.T(`gal${i + 3}`, () => CT.gallery(i + 3)), 1.1, 1.1, X1 - 0.17, y + 0.5, z, -Math.PI / 2, S as any));
+    this.card(this.T("rules", () => CT.posterRules()), 1.5, 2.0, X1 - 0.17, 2.4, 2.0, -Math.PI / 2, S as any); this.card(this.T("cal", () => CT.calendar()), 1.1, 1.4, X1 - 0.17, 2.4, 4.0, -Math.PI / 2, S as any);
+    this.card(this.T("quote", () => CT.posterQuote("Every question is a good question.")), 3.4, 0.85, 0, 3.0, Z1 - 0.2, Math.PI, S as any);
+    // bunting along both side walls and the front
+    const bun = (x0: number, z0: number, x1: number, z1: number, y: number) => { const cols = [0xF28F7E, 0xEAB94E, 0x8FC9E8, 0xA9DCC0, 0xB8A8DA, 0xEAA5B2].map((c) => new THREE.Color(c)), pos: number[] = [], col: number[] = []; const len = Math.hypot(x1 - x0, z1 - z0), n = Math.floor(len / 0.8), tx = (x1 - x0) / len, tz = (z1 - z0) / len; for (let i = 0; i < n; i++) { const d = 0.4 + i * 0.8, cx = x0 + tx * d, cz = z0 + tz * d, c = cols[i % 6]; pos.push(cx - tx * 0.2, y, cz - tz * 0.2, cx + tx * 0.2, y, cz + tz * 0.2, cx, y - 0.44, cz); for (let k = 0; k < 3; k++) col.push(c.r, c.g, c.b); } const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); S.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))); };
+    bun(X0 + 0.07, Z0, X0 + 0.07, Z1, WALL - 0.12); bun(X1 - 0.07, Z0, X1 - 0.07, Z1, WALL - 0.12); bun(X0, Z1 - 0.07, X1, Z1 - 0.07, WALL - 0.12);
+    [[-5, -5.5, "#F8D977"], [5, -5.5, "#F28F7E"], [-5, 0, "#8FC9E8"], [5, 0, "#A9DCC0"], [-5, 5.5, "#B8A8DA"], [5, 5.5, "#EAA5B2"]].forEach(([x, z, col]: any) => { const l = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 14), new THREE.MeshStandardMaterial({ map: HT.lanternTex(col), emissive: new THREE.Color(col), emissiveIntensity: 0.25, roughness: 1 })); l.scale.y = 1.2; l.position.set(x, WALL - 1.1, z); l.castShadow = true; S.add(l); const str = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1, 4), this.plain("#9A653D")); str.position.set(x, WALL - 0.55, z); S.add(str); });
+    // bookshelf + globe + pet cage (left wall front), cubbies + door + reading corner (back)
+    const shelf = new THREE.Group(); this.box(0.5, 1.6, 3.6, this.plain("#C98B4D"), 0, 0.8, 0, { parent: shelf }); for (let i = 0; i < 4; i++) this.box(0.52, 0.05, 3.6, this.plain("#9A653D"), 0, 0.05 + i * 0.45, 0, { parent: shelf, outline: false }); const bc = ["#4F91C7", "#E07A66", "#88B89A", "#EAB94E", "#B8A8DA", "#F28F7E", "#8173AE"]; for (let r = 0; r < 3; r++) { let z = -1.6; for (let k = 0; k < 14; k++) { const w = 0.16 + (k * 37 % 5) * 0.03; this.box(0.34, 0.34 - (k % 3) * 0.04, w, this.plain(bc[(k + r * 2) % 7]), 0, 0.28 + r * 0.45 + 0.17 - (k % 3) * 0.02, z + w / 2, { parent: shelf, outline: false, shadow: false }); z += w + 0.01; } } shelf.position.set(X0 + 0.4, 0, -6.2); S.add(shelf);
+    const globe = new THREE.Mesh(new THREE.SphereGeometry(0.28, 20, 16), new THREE.MeshStandardMaterial({ map: this.globeTex(), roughness: 0.9 })); globe.position.set(X0 + 0.46, 1.78, -5.4); globe.castShadow = true; S.add(globe); this.box(0.06, 0.12, 0.06, this.plain("#9A653D"), X0 + 0.46, 1.54, -5.4, { outline: false });
+    const cage = this.box(0.5, 0.36, 0.4, new THREE.MeshStandardMaterial({ color: "#CFEFFB", transparent: true, opacity: 0.55, roughness: 0.4 }), X0 + 0.46, 1.56 + 0.3, -7.2); const ham = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), this.plain("#E8C39A")); ham.position.set(X0 + 0.46, 1.78, -7.2); S.add(ham); void cage;
+    for (let i = 0; i < 6; i++) { const x = X0 + 1 + i * 1.2; this.box(1.0, 1.0, 0.5, this.plain(["#F2A79B", "#9CC3E0", "#F4D488", "#B7D8A4", "#C9B7E8", "#F6B294"][i]), x, 0.5, Z1 - 0.3); this.box(0.8, 0.34, 0.04, this.plain("#fff6ea"), x, 0.78, Z1 - 0.07, { outline: false, shadow: false }); }
+    const door = this.card(this.T("door", () => HT.doorTex("#8173AE")), 1.3, PROP_H.classDoor, X1 - 1.6, PROP_H.classDoor / 2, Z1 - 0.12, Math.PI, S as any); void door; this.card(this.T("exit", () => HT.signTex("EXIT", "#E07A66")), 1.0, 0.25, X1 - 1.6, PROP_H.classDoor + 0.25, Z1 - 0.12, Math.PI, S as any);
+    const rug = new THREE.Mesh(new THREE.CircleGeometry(1.6, 32), this.std(this.rep("rug2", () => CT.carpet(), 2, 2))); rug.rotation.x = -Math.PI / 2; rug.position.set(X0 + 2.0, rowH(5) + 0.012, Z1 - 1.4); S.add(rug); [["#E07A66", -0.5, 0.3], ["#4F91C7", 0.5, -0.3], ["#88B89A", 0.2, 0.8]].forEach(([c, dx, dz]: any) => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), this.plain(c)); b.scale.set(1, 0.6, 1); b.position.set(X0 + 2.0 + dx, rowH(5) + 0.2, Z1 - 1.4 + dz); b.castShadow = true; S.add(b); });
+    for (const [x, z] of [[X0 + 0.8, Z0 + 1.0], [X1 - 0.8, Z1 - 0.8], [X0 + 0.8, Z1 - 0.8]]) this.plant(x, rowH(z > 4 ? 5 : 0) + (z < -7 ? STAGE_H : 0), z);
+    void G;
+  }
+
+  /* ------------------------------------------------------------ extra fixtures: the small things that make a real classroom read as real */
+  private textTex(w: number, h: number, draw: (c: CanvasRenderingContext2D, w: number, h: number) => void) { const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const c = cv.getContext("2d")!; draw(c, w, h); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; }
+  private cyl(rt: number, rb: number, h: number, col: string, x: number, y: number, z: number, parent: THREE.Object3D = this.scene, seg = 14) { const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), this.plain(col)); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; }
+  private buildDetails() {
+    const S = this.scene, wid = X1 - X0, dep = Z1 - Z0, cream = "#F7ECD6", wood = "#9A653D", ink = "#4A3B3F", B = (w: number, h: number, d: number, col: string, x: number, y: number, z: number, parent: THREE.Object3D = S) => this.box(w, h, d, this.plain(col), x, y, z, { outline: false, shadow: false, parent });
+    // crown moulding + back baseboard
+    B(wid, 0.14, 0.14, cream, 0, WALL - 0.07, Z0 + 0.07); B(wid, 0.14, 0.14, cream, 0, WALL - 0.07, Z1 - 0.07); for (const s of [-1, 1]) B(0.14, 0.14, dep, cream, s * (wid / 2 - 0.07), WALL - 0.07, (Z0 + Z1) / 2);
+    B(wid, 0.22, 0.1, wood, 0, 0.11, Z1 - 0.05);
+    // ceiling: light-panel frames, sprinklers, vents, smoke detectors, speakers, conduit
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) B(2.7, 0.02, 1.4, "#C9C2B2", -5.5 + i * 5.5, WALL - 0.005, -6 + j * 4.6);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 5; j++) { const x = -7.5 + i * 5, z = -7.5 + j * 3.9; this.cyl(0.03, 0.03, 0.12, "#B8B2A4", x, WALL
