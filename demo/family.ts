@@ -1,223 +1,133 @@
-/** Family accounts. A PARENT signs up (email + password); children are profiles under the parent (a nickname, a grade band and a 4-digit PIN).
- *  Children never give an email address. The parent signs in once on a device; kids then pick their profile and type their PIN, and their progress,
- *  avatar, grades and phone data follow them to any device the parent signs in on. Guests can still play with nothing saved online.
- *  Locker PHOTOS never leave the device. The backend is swappable (window.__FAMILY_BACKEND) so the whole flow can be tested without a cloud back end. */
-import { gradesFromState } from "../src/hall3d/lockerui";
-import { rememberCurrent } from "../src/hall3d/mates";
-import { isMainAccount, parentGrade, setParentGrade } from "../src/class3d/gradeband";
-import { SUBJECT_NAME } from "../src/game/progress";
+// family.ts — the family account modal: sign-up/sign-in, check-in codes, child profiles,
+// parent tools, per-device progress sync. Talks to a backend through the small `Backend` interface
+// so the game never touches the network directly.
+import { gradesFromState, SUBJECT_NAME } from "../game/grades";
+import { parentGrade, setParentGrade, gradeName } from "../game/grade";
 
-interface User { uid: string; email: string | null; verified: boolean }
-interface KidDoc { id: string; name: string; age: string; salt: string; hash: string; created: number; color?: string; icon?: string; grade?: number; login_email?: string | null }
-/** what a child's own sign-in resolves to: the family it belongs to and the one child row it may see */
-interface KidSession { family: string; kid: KidDoc }
-/** the parent/family profile, stored on the family document itself */
-interface Profile { family: string; name: string; role: string; color: string; salt?: string; hash?: string; updated: number }
-interface Backend {
-  onUser(cb: (u: User | null) => void): void; signUp(e: string, p: string): Promise<User>; signIn(e: string, p: string): Promise<User>; reset(e: string): Promise<void>; signOut(): Promise<void>; verifyEmail(): Promise<void>;
-  profile(uid: string): Promise<Profile | null>; saveProfile(uid: string, p: Profile): Promise<void>;
-  kids(uid: string): Promise<KidDoc[]>; saveKid(uid: string, k: KidDoc): Promise<void>; deleteKid(uid: string, id: string): Promise<void>;
-  getData(uid: string, kid: string, key: string): Promise<{ json: string; at: number } | null>; setData(uid: string, kid: string, key: string, json: string, at: number): Promise<void>; deleteAccount(uid: string): Promise<void>;
-  /** classmate showcases: this child's row (or null), an upsert of any of its fields, and every visible showcase at school */
-  getShowcase?(uid: string, kid: string): Promise<{ visible: boolean } | null>; setShowcase?(uid: string, kid: string, row: { name?: string; json?: string; visible?: boolean }): Promise<void>; showcases?(): Promise<{ key: string; name: string; json: string }[]>;
-  /** optional: a child's own sign-in (rpc kid_login_*, my_kid_login) and the parent's chat switches on net_users */
-  createKidLogin?(kid: string, local: string, password: string): Promise<string>; setKidPassword?(kid: string, password: string): Promise<void>; removeKidLogin?(kid: string): Promise<void>;
-  signInKid?(email: string, password: string): Promise<KidSession>; kidLogin?(): Promise<KidSession | null>;
-  getNet?(uid: string, kid: string): Promise<{ open: boolean; visible: boolean } | null>; setNet?(uid: string, kid: string, patch: { open?: boolean; visible?: boolean }): Promise<void>;
-}
-const SYNC = ["unify.social.v1", "unify.progress.v1", "unify.curapp.v1", "unify.locker.v1", "unify.assess.on", "flip.chats", "flip.unread", "flip.reminders", "flip.events", "flip.homework", "unify.opendoor.v1", "unify.dorm.v1"];
-const FKEY = "unify.family.v1", GUEST_BACKUP = "unify.guest.backup.v1", STASH = "unify.locker.pics.";
-interface Local { mode?: "guest" | "family"; kid?: string; kidName?: string }
-const lget = (): Local => { try { return JSON.parse(localStorage.getItem(FKEY) || "{}"); } catch { return {}; } };
-const lset = (v: Local) => { try { localStorage.setItem(FKEY, JSON.stringify(v)); } catch { /* private mode */ } };
-const sdoc = (k: string) => k.replace(/\./g, "_");
+export interface User { uid: string; email: string | null; verified: boolean }
+export interface Profile { family: string; name: string; role: string; color: string; salt?: string; hash?: string; updated: number }
+export interface KidDoc { id: string; name: string; age: number; grade: number; salt: string; hash: string; created: number; color: string; icon: string; login_email?: string | null }
+export interface KidSession { family: string; kid: KidDoc }
+export interface DataRow { json: string; updated: number }
 
-/* ---------------- Supabase backend (supabase-js loads from the CDN only when needed) ---------------- */
-function supabaseBackend(): Backend {
-  const cl = (): Promise<any> => (window as any).__supa();
-  const U = (u: any): User => ({ uid: u.id, email: u.email ?? null, verified: !!u.email_confirmed_at });
-  const fail = (e: any): never => { const err: any = new Error(e?.message || "Something went wrong"); err.code = e?.code || e?.error_code || e?.message; throw err; };
-  const ok = <T,>(r: { data: T; error: any }): T => { if (r.error) fail(r.error); return r.data; };
-  return {
-    onUser(cb) { cl().then((c) => { c.auth.onAuthStateChange((_ev: string, s: any) => cb(s?.user && !s.user.is_anonymous ? U(s.user) : null)); }).catch(() => cb(null)); },
-    async signUp(e, p) { const c = await cl(); const r = await c.auth.signUp({ email: e, password: p, options: { emailRedirectTo: location.origin + location.pathname } }); if (r.error) fail(r.error); if (!r.data.session) { const err: any = new Error("Check your email to confirm, then sign in."); err.code = "confirm-email"; throw err; } return U(r.data.user); },
-    async signIn(e, p) { const c = await cl(); const r = await c.auth.signInWithPassword({ email: e, password: p }); if (r.error) fail(r.error); return U(r.data.user); },
-    async reset(e) { const c = await cl(); ok(await c.auth.resetPasswordForEmail(e, { redirectTo: location.origin + location.pathname })); },
-    async signOut() { const c = await cl(); await c.auth.signOut(); },
-    async verifyEmail() { const c = await cl(); const u = (await c.auth.getUser()).data.user; if (u?.email) ok(await c.auth.resend({ type: "signup", email: u.email })); },
-    async profile(uid) { const c = await cl(); const r = ok(await c.from("families").select("profile").eq("uid", uid).maybeSingle()) as any; return r?.profile ?? null; },
-    async saveProfile(uid, p) { const c = await cl(); ok(await c.from("families").upsert({ uid, profile: p, updated_at: new Date().toISOString() })); },
-    async kids(uid) { const c = await cl(); const r = ok(await c.from("kids").select("*").eq("family", uid).order("created")) as any[]; return r.map(({ family: _f, ...k }) => k as KidDoc); },
-    async saveKid(uid, k) {
-      const c = await cl(); ok(await c.from("families").upsert({ uid })); const { login_email: _l, ...row } = k;      // login_email is set by the server only
-      let r = await c.from("kids").upsert({ family: uid, ...row });
-      if (r.error && (r.error.code === "42703" || r.error.code === "PGRST204" || /grade/i.test(r.error.message || ""))) { const { grade: _g, ...old } = row; r = await c.from("kids").upsert({ family: uid, ...old }); }   // before the migration: no grade column yet
-      ok(r);
-    },
-    async deleteKid(uid, id) { const c = await cl(); ok(await c.from("kids").delete().eq("family", uid).eq("id", id)); },
-    async getData(uid, kid, key) { const c = await cl(); const r = ok(await c.from("kid_data").select("json,at").eq("family", uid).eq("kid", kid).eq("key", key).maybeSingle()) as any; return r ? { json: r.json, at: Number(r.at) } : null; },
-    async setData(uid, kid, key, json, at) { const c = await cl(); ok(await c.from("kid_data").upsert({ family: uid, kid, key, json, at })); },
-    async getShowcase(uid, kid) { const c = await cl(); const r = ok(await c.from("showcases").select("visible").eq("family", uid).eq("kid", kid).maybeSingle()) as any; return r ? { visible: !!r.visible } : null; },
-    async setShowcase(uid, kid, row) { const c = await cl(); ok(await c.from("showcases").upsert({ family: uid, kid, ...row })); },
-    async showcases() { const c = await cl(); const r = ok(await c.from("showcases").select("family,kid,name,json").eq("visible", true).neq("json", "")) as any[]; return r.map((x) => ({ key: x.family + "/" + x.kid, name: x.name, json: x.json })); },
-    async createKidLogin(kid, local, password) { const c = await cl(); return ok(await c.rpc("kid_login_create", { p_kid: kid, p_local: local, p_password: password })) as string; },
-    async setKidPassword(kid, password) { const c = await cl(); ok(await c.rpc("kid_login_password", { p_kid: kid, p_password: password })); },
-    async removeKidLogin(kid) { const c = await cl(); ok(await c.rpc("kid_login_remove", { p_kid: kid })); },
-    async kidLogin() { const c = await cl(); const r = ok(await c.rpc("my_kid_login")) as any[] | null; const x = r?.[0]; return x ? { family: x.family, kid: { id: x.kid, name: x.name, age: x.age, grade: x.grade ?? undefined, color: x.color ?? undefined, icon: x.icon ?? undefined, login_email: x.email, salt: "", hash: "", created: 0 } } : null; },
-    async signInKid(email, password) {
-      const c = await cl(); const r = await c.auth.signInWithPassword({ email, password }); if (r.error) fail(r.error);
-      const s = await (this as Backend).kidLogin!(); if (!s) { await c.auth.signOut(); const err: any = new Error("not a student"); err.code = "not-kid"; throw err; } return s;
-    },
-    async getNet(uid, kid) { const c = await cl(); const r = ok(await c.from("net_users").select("open,visible").eq("id", `${uid}_${kid}`).maybeSingle()) as any; return r ? { open: !!r.open, visible: r.visible !== false } : null; },
-    async setNet(uid, kid, patch) { const c = await cl(); ok(await c.from("net_users").update(patch).eq("id", `${uid}_${kid}`)); },
-    /** removes the family, children and any people-network profiles. (The sign-in itself can be removed by the owner in the Supabase dashboard.) */
-    async deleteAccount(uid) { const c = await cl(); ok(await c.from("net_users").delete().eq("owner", uid)); ok(await c.from("phone_state").delete().eq("uid", uid)); ok(await c.from("families").delete().eq("uid", uid)); await c.auth.signOut(); },
-  };
+export interface Backend {
+  signUp(email: string, pw: string): Promise<User>;
+  signIn(email: string, pw: string): Promise<User>;
+  signOut(): Promise<void>;
+  reset(email: string): Promise<void>;
+  verifyEmail(): Promise<void>;
+  onUser(cb: (u: User | null) => void): void;
+  profile(uid: string): Promise<Profile | null>;
+  saveProfile(uid: string, p: Profile): Promise<void>;
+  kids(uid: string): Promise<KidDoc[]>;
+  saveKid(uid: string, k: KidDoc): Promise<void>;
+  deleteKid(uid: string, kid: string): Promise<void>;
+  deleteAccount(uid: string): Promise<void>;
+  getData(uid: string, kid: string, key: string): Promise<DataRow | null>;
+  putData(uid: string, kid: string, key: string, json: string): Promise<void>;
+  classmates?(uid: string, kid: string): Promise<{ id: string; name: string; spec: unknown }[]>;
+  getShowcase?(uid: string, kid: string): Promise<{ visible: boolean } | null>;
+  setShowcase?(uid: string, kid: string, v: { visible: boolean }): Promise<void>;
+  getNet?(uid: string, kid: string): Promise<{ open: boolean; visible: boolean } | null>;
+  setNet?(uid: string, kid: string, v: { open?: boolean; visible?: boolean }): Promise<void>;
+  createKidLogin?(kid: string, local: string, pw: string): Promise<string>;
+  setKidPassword?(kid: string, pw: string): Promise<void>;
+  removeKidLogin?(kid: string): Promise<void>;
+  signInKid?(addr: string, pw: string): Promise<KidSession>;
+  kidLogin?(): Promise<KidSession | null>;
 }
 
-/* ---------------- state helpers ---------------- */
-const readKey = (k: string): string | null => { try { return localStorage.getItem(k); } catch { return null; } };
-const writeKey = (k: string, v: string | null) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* full */ } };
-/** what goes to the cloud: the synced keys, with locker PHOTOS removed */
-function snapshot(): Record<string, string> { const o: Record<string, string> = {}; for (const k of SYNC) { let v = readKey(k); if (v == null) continue; if (k === "unify.locker.v1") { try { const j = JSON.parse(v); for (const id of Object.keys(j.d || {})) j.d[id].pics = []; v = JSON.stringify(j); } catch { continue; } } o[k] = v; } return o; }
-const anyLocal = () => SYNC.some((k) => readKey(k) != null);
-function clearLocal(kid: string | null) { if (kid) { const l = readKey("unify.locker.v1"); if (l) writeKey(STASH + kid, l); } for (const k of SYNC) writeKey(k, null); }
-/** put a kid's saved locker photos back when the same locker is loaded on this device again */
-function restoreStash(kid: string) { const s = readKey(STASH + kid), cur = readKey("unify.locker.v1"); if (!s || !cur) return; try { const a = JSON.parse(s), b = JSON.parse(cur); if (a.mine === b.mine && b.mine != null) { const id = String(b.mine); if (a.d?.[id] && b.d?.[id] && !(b.d[id].pics || []).length) b.d[id].pics = a.d[id].pics || []; writeKey("unify.locker.v1", JSON.stringify(b)); } } catch { /* ignore */ } }
-const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, "0")).join("");
-const rnd = (n = 8) => hex(crypto.getRandomValues(new Uint8Array(n)).buffer);
-const hashPin = async (salt: string, pin: string) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(salt + ":" + pin)));
-
-/* ---------------- UI ---------------- */
-const CSS = `
-#fam{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;background:rgba(40,30,30,.55);font-family:var(--ui,"Fredoka","Trebuchet MS",system-ui,sans-serif);color:var(--ink,#4A3B3F)}#fam.show{display:flex}
-.fm-p{width:min(520px,94vw);max-height:92vh;overflow:auto;background:var(--kraft,#F3E7CF);border:1px solid rgba(255,255,255,.75);border-radius:16px;box-shadow:0 3px 0 var(--edge,#C9B28A),0 14px 34px rgba(60,40,30,.45);padding:16px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
-.fm-p h2{font-size:21px;margin:0;font-weight:600}.fm-p p{margin:0;font-size:14px;line-height:1.4}.fm-sm{font-size:12px;color:var(--soft,#8A7A70)}
-.fm-b{font:inherit;font-size:15px;padding:8px 14px;border-radius:11px;border:1px solid rgba(255,255,255,.8);background:#FFF9F0;color:inherit;cursor:pointer;box-shadow:0 2px 0 var(--edge,#C9B28A);min-height:40px}.fm-b.pri{background:var(--acc,#E07A66);color:#fff;box-shadow:0 2px 0 #b95a48}.fm-b.go{background:#4E8A64;color:#fff;box-shadow:0 2px 0 #35674a}.fm-b:disabled{opacity:.55}.fm-b:active{transform:translateY(2px);box-shadow:none}
-.fm-in{font:inherit;font-size:16px;padding:9px 11px;border-radius:10px;border:1px solid var(--edge,#C9B28A);background:#fff;width:100%;box-sizing:border-box}
-.fm-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.fm-err{color:#a8322a;font-size:14px;min-height:18px}
-.fm-kid{display:flex;align-items:center;gap:12px;background:#FFF9F0;border-radius:12px;padding:10px 12px;border:1px solid rgba(74,59,63,.15)}.fm-kid i{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-weight:600;font-size:20px;color:#fff}.fm-kid b{flex:1;font-size:17px}
-.fm-pin{letter-spacing:12px;text-align:center;font-size:28px}.fm-tab{display:flex;gap:6px}.fm-tab .fm-b.on{background:var(--acc,#E07A66);color:#fff}
-.fm-sw{display:flex;gap:7px;flex-wrap:wrap}.fm-sw button{width:34px;height:34px;border-radius:50%;border:3px solid transparent;cursor:pointer;font-size:18px;padding:0;background:#fff}.fm-sw button.on{border-color:var(--ink,#4A3B3F)}.fm-bot{margin-top:6px;padding-top:10px;border-top:1px solid rgba(74,59,63,.2);display:flex;gap:8px;flex-wrap:wrap;justify-content:center}.fm-lab{font-size:12px;color:var(--soft,#8A7A70);margin-bottom:-4px}.fm-who{display:flex;align-items:center;gap:10px}.fm-who i{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-weight:600;color:#fff}
-.fm-tb{width:100%;border-collapse:collapse}.fm-tb td,.fm-tb th{padding:5px 6px;text-align:left;border-bottom:1px solid rgba(74,59,63,.15);font-size:14px}
-`;
-const E = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text = "") => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; parent?.appendChild(e); return e; };
-const COLORS = ["#E07A66", "#4F91C7", "#5E9C72", "#B8A8DA", "#EAB94E", "#C98569"];
-const errText = (e: any): string => { const c = e?.code || e?.message || String(e); return ({
-  "confirm-email": "Almost there! Check your email and tap the confirm link, then come back and sign in.", invalid_credentials: "Wrong email or password.", user_already_exists: "There's already an account with that email. Try signing in.", email_exists: "There's already an account with that email. Try signing in.", weak_password: "Use a longer password (at least 6 characters).", email_not_confirmed: "Please confirm your email first (check your inbox), then sign in.", over_email_send_rate_limit: "Too many emails were sent just now. Please wait a few minutes and try again.", over_request_rate_limit: "Too many tries. Please wait a moment.", validation_failed: "That doesn't look right. Please check your email and password.", provider_disabled: "Google sign-in isn't switched on yet. (Owner: Supabase dashboard, Authentication, Providers, Google.)", signup_disabled: "Sign-ups are switched off right now.",
-  "auth/operation-not-allowed": "That sign-in method isn't switched on yet. (Owner: Supabase dashboard, Authentication, Providers.)", "auth/email-already-in-use": "There's already an account with that email. Try signing in.", "auth/invalid-email": "That email doesn't look right.", "auth/weak-password": "Use a password with at least 6 characters.",
-  "auth/invalid-credential": "Wrong email or password.", "auth/wrong-password": "Wrong email or password.", "auth/user-not-found": "No account with that email.", "auth/too-many-requests": "Too many tries. Wait a minute and try again.", "auth/unauthorized-domain": "This web address isn't authorized for sign-in yet. (Owner: add it under Authentication, Settings, Authorized domains.)",
-  "auth/popup-closed-by-user": "The Google window was closed.", "auth/network-request-failed": "No internet connection.", "permission-denied": "The cloud refused that. (Owner: check the Supabase row-level security policies.)", "auth/requires-recent-login": "For safety, sign out, sign in again, and then try once more.",
-  "not-kid": "That isn't a student sign-in. Parents sign in on the other tab." } as Record<string, string>)[c] ?? ({ "Parents only.": "Parents only.", "This child already has a sign-in.": "This child already has a sign-in.", "The password needs 8 to 72 characters.": "The password needs 8 to 72 characters.", "That child is not in your family.": "That child is not in your family.", "Academy addresses are created by a parent from the family screen.": "Academy addresses are created by a parent from the family screen." } as Record<string, string>)[e?.message] ?? (e?.message && /^(P\d|\d{5}$|PGRST)/.test(String(c)) ? e.message : `Something went wrong (${c}).`); };
-
-let B: Backend, USER: User | null = null, KIDS: KidDoc[] = [], root: HTMLElement, panel: HTMLElement, btn: HTMLButtonElement;
+/* ---------------- local state ---------------- */
+const LS_MODE = "unify.family.local", GUEST_BACKUP = "unify.family.guestBackup";
+const SYNC = ["unify.progress.v1", "unify.avatar", "unify.locker", "unify.dorm.room", "unify.stamps", "unify.weekly", "unify.buddy"];
+let B: Backend, USER: User | null = null, KIDS: KidDoc[] = [], activeKid: string | null = null;
+let root: HTMLElement, panel: HTMLElement, btn: HTMLButtonElement;
 let PROFILE: Profile | null = null, PROFILE_LOADED = false, kidLogin = false, kidSigningIn = false;
-let activeKid: string | null = null, lastPushed: Record<string, string> = {}, pushing = false, syncMsg = "";
+let syncMsg = "";
 
-/** the classmate showcase: this child's locker decor, avatar and claimed locker number. Never photos. */
-function showcaseJson(): string | null {
-  try {
-    const soc = JSON.parse(readKey("unify.social.v1") || "{}"), lk = JSON.parse(readKey("unify.locker.v1") || "null");
-    const mine = Number.isInteger(lk?.mine) ? lk.mine : null, d = mine != null ? lk?.d?.[String(mine)] : null;
-    // the avatar is shared without its closet and favourites (they are private and large); the dorm layout is shared without photos
-    let avatar: Record<string, unknown> | null = null; if (soc?.profile?.avatar) { const a: Record<string, unknown> = { ...soc.profile.avatar }; delete a.closet; delete a.favs; avatar = a; }
-    let dorm: { items?: unknown[]; photos?: unknown; note?: unknown } | null = null; try { const dj = JSON.parse(readKey("unify.dorm.v1") || "null"); if (dj && typeof dj === "object" && Array.isArray(dj.items)) { dorm = { ...dj }; delete dorm!.photos; } } catch { /* no dorm yet */ }
-    const o: Record<string, unknown> = { slot: mine, avatar, stickers: Array.isArray(d?.stickers) ? d.stickers.slice(0, 14) : [], note: typeof d?.note === "string" ? d.note.slice(0, 140) : "", theme: typeof d?.theme === "string" ? d.theme : "", dorm };
-    let j = JSON.stringify(o);
-    // keep the whole showcase under 20,000 characters: trim the dorm from the end (the student's own additions come last), then drop it
-    while (j.length > 20000 && dorm && Array.isArray(dorm.items) && dorm.items.length > 8) { dorm.items = dorm.items.slice(0, Math.max(8, dorm.items.length - 6)); j = JSON.stringify(o); }
-    if (j.length > 20000) { o.dorm = null; j = JSON.stringify(o); }
-    if (j.length > 20000) { o.stickers = []; o.note = ""; j = JSON.stringify(o); }
-    return j;
-  } catch { return null; }
-}
-let lastShowcase = "";
-/** publish this child's showcase when it changed (the parent's visible switch is never overwritten here) */
-async function publishShowcase(): Promise<void> {
-  if (!B.setShowcase || !USER || !activeKid) return;
-  const json = showcaseJson(); if (json == null) return;
-  const name = lget().kidName || "Student", sig = activeKid + "|" + name + "|" + json;
-  if (sig === lastShowcase) return;
-  await B.setShowcase(USER.uid, activeKid, { name, json }); lastShowcase = sig;
-}
-/** fetch the other families' visible showcases and hand them to the hall's locker model */
-async function refreshClassmates(): Promise<void> {
-  if (!B.showcases) return;
-  let rows: { key: string; name: string; json: string }[] = [];
-  if (USER) { try { rows = (await B.showcases()).filter((r) => r.key !== USER!.uid + "/" + activeKid); } catch { return; } }
-  (window as any).__classmates = rows; window.dispatchEvent(new CustomEvent("unify:classmates", { detail: rows }));
-}
-async function pushNow(): Promise<void> {
-  if (!USER || !activeKid || pushing) return; pushing = true;
-  try { const s = snapshot(), at = Date.now(); for (const k of Object.keys(s)) if (lastPushed[k] !== s[k]) { await B.setData(USER.uid, activeKid, k, s[k], at); lastPushed[k] = s[k]; } await publishShowcase(); localStorage.setItem("unify.family.at." + activeKid, String(at)); syncMsg = "Saved " + new Date(at).toLocaleTimeString(); }
-  catch (e) { syncMsg = "Couldn't save: " + errText(e); } pushing = false; paintBtn();
-}
-/** copy a kid's cloud data over this device's data. force = take everything; otherwise only documents newer than the last time this device synced */
-async function pull(uid: string, kid: string, force: boolean): Promise<boolean> {
-  const seen = force ? 0 : Number(readKey("unify.family.at." + kid) || 0); let changed = false, newest = seen;
-  for (const k of SYNC) { const d = await B.getData(uid, kid, k); if (d && d.at > seen) { if (readKey(k) !== d.json) changed = true; writeKey(k, d.json); newest = Math.max(newest, d.at); } }
-  if (newest > seen) writeKey("unify.family.at." + kid, String(newest)); restoreStash(kid); return changed;
-}
-const paintBtn = () => {
-  if (!(window as any).__SUPABASE && !(window as any).__FAMILY_BACKEND && !USER) {
-    const g = parentGrade();
-    btn.textContent = !isMainAccount() ? (g == null ? "👪 Grade" : `👪 Grade ${g === 0 ? "K" : g}`) : (g == null ? "👪 Set grade" : `👪 Grade ${g === 0 ? "K" : g}`);
-    btn.title = isMainAccount() ? "You are the main account. You set the grade." : "Only the main account can change the grade.";
-    return;
-  }
-  btn.textContent = activeKid ? `👪 ${lget().kidName ?? "Family"}` : USER ? "👪 Who's playing?" : "👪 Sign in"; btn.title = activeKid ? syncMsg || "Family account" : "Family accounts: save your progress and use it on any device";
-};
+const COLORS = ["#E07A66", "#4F91C7", "#1F9A78", "#E8A33D", "#8E7CC3", "#C4553A", "#2E86C1", "#D4536A"];
+const ICONS = ["🦊", "🐻", "🐰", "🦁", "🐸", "🐼", "🦄", "🐯", "🦉", "🐳"];
+const ROLES = ["Mom", "Dad", "Grandma", "Grandpa", "Guardian"];
 
-/** switch the device to a kid (or to guest): save the current one, swap the local data, then reload so every part of the game re-reads it */
-async function activate(kid: KidDoc | null, importLocal = false): Promise<void> {
-  try { const kd = kid ?? null; if (kd && USER) { localStorage.setItem("unify.family.link", JSON.stringify({ uid: USER.uid, kid: kd.id, band: (kd as any).age ?? (kd as any).band ?? "hs", grade: gradeOf(kd) })); setParentGrade(gradeOf(kd)); } else localStorage.removeItem("unify.family.link"); } catch { /* private mode */ }
-  if (USER && activeKid) { rememberCurrent(); await pushNow(); }
-  const before = lget();
-  if (kid && USER) {
-    if (before.mode !== "family" && anyLocal()) { const g: Record<string, string | null> = {}; for (const k of SYNC) g[k] = readKey(k); writeKey(GUEST_BACKUP, JSON.stringify(g)); }   // never lose guest progress
-    const carry: Record<string, string | null> = {}; if (importLocal) for (const k of SYNC) carry[k] = readKey(k);
-    clearLocal(activeKid);
-    if (importLocal) { for (const k of SYNC) if (carry[k] != null) writeKey(k, carry[k]); } else await pull(USER.uid, kid.id, true);
-    lset({ mode: "family", kid: kid.id, kidName: kid.name });
-  } else { clearLocal(activeKid); try { const g = JSON.parse(readKey(GUEST_BACKUP) || "{}"); for (const k of SYNC) if (g[k] != null) writeKey(k, g[k]); } catch { /* ignore */ } lset({ mode: "guest" }); }
-  location.reload();
+const lget = (): { mode?: string; kid?: string; kidName?: string } => { try { return JSON.parse(localStorage.getItem(LS_MODE) || "{}"); } catch { return {}; } };
+const lset = (v: Record<string, unknown>) => { try { localStorage.setItem(LS_MODE, JSON.stringify({ ...lget(), ...v })); } catch { /* private */ } };
+const readKey = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const writeKey = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private */ } };
+const anyLocal = () => SYNC.some((k) => readKey(k));
+const clearLocal = (exceptKid: string | null) => { void exceptKid; for (const k of SYNC) try { localStorage.removeItem(k); } catch { /* private */ } };
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const rnd = (n: number) => { const a = "abcdefghijklmnopqrstuvwxyz0123456789"; let s = ""; const b = crypto.getRandomValues(new Uint8Array(n)); for (let i = 0; i < n; i++) s += a[b[i] % a.length]; return s; };
+async function hashPin(salt: string, pin: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`unify.${salt}.${pin}`));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function open() { root.classList.add("show"); route(); }
-function close() { root.classList.remove("show"); }
-const card = (title: string) => { panel.innerHTML = ""; E("h2", "", panel, title); };
-
-async function route() {
-  if (kidLogin) { void kidHome(); return; }
-  if (!USER) { welcome(); return; }
-  if (!PROFILE_LOADED) { card("One moment…"); try { PROFILE = await B.profile(USER.uid); } catch { PROFILE = null; } PROFILE_LOADED = true; }
-  if (!PROFILE && !sessionStorage.getItem("unify.family.skipsetup")) parentSetup(false); else if (!role()) void checkin(); else profiles();
-}
-const ICONS = ["🦊", "🐼", "🦄", "🐯", "🐸", "🦉", "🐙", "🚀", "⚽", "🎨", "🎸", "🌟"];
-const AGE_NAME: Record<string, string> = { k2: "Grades K-2", g35: "Grades 3-5", g68: "Grades 6-8", hs: "High school" };
-const gradeName = (g: number) => (g === 0 ? "Kindergarten" : "Grade " + g);
-const bandOf = (g: number) => (g <= 2 ? "k2" : g <= 5 ? "g35" : g <= 8 ? "g68" : "hs");
-const gradeOf = (k: { grade?: number | null; age: string }) => (typeof k.grade === "number" ? k.grade : ({ k2: 1, g35: 4, g68: 7, hs: 10 } as Record<string, number>)[k.age] ?? 4);
-const gradeLabel = (k: KidDoc) => (typeof k.grade === "number" ? gradeName(k.grade) : AGE_NAME[k.age] ?? "");
-function gradeSelect(parent: HTMLElement, cur: number) { const s = E("select", "fm-in", parent) as HTMLSelectElement; s.setAttribute("aria-label", "Grade"); for (let g = 0; g <= 12; g++) { const o = E("option", "", s, gradeName(g)); o.setAttribute("value", String(g)); } s.value = String(cur); return s; }
-const ROLES = ["Mom", "Dad", "Guardian", "Grandparent", "Other"];
-const bubble = (parent: HTMLElement, o: { color: string; icon?: string; name: string }) => { const i = E("i", "", parent, o.icon || o.name.slice(0, 1).toUpperCase()); i.style.background = o.color; return i; };
+const bandOf = (grade: number) => (grade <= 2 ? 0 : grade <= 5 ? 1 : grade <= 8 ? 2 : 3);
+const gradeOf = (k: KidDoc) => k.grade;
+const gradeLabel = (k: KidDoc) => gradeName(gradeOf(k));
 const kidColor = (k: KidDoc, i: number) => k.color || COLORS[i % COLORS.length];
-/** pick one swatch from a list (colors or icons) */
-function swatches(parent: HTMLElement, label: string, items: string[], cur: string, isColor: boolean, set: (v: string) => void) {
-  E("div", "fm-lab", parent, label); const w = E("div", "fm-sw", parent);
-  items.forEach((v) => { const b = E("button", v === cur ? "on" : "", w, isColor ? "" : v); b.type = "button"; if (isColor) b.style.background = v; b.setAttribute("aria-label", v); b.onclick = () => { set(v); w.querySelectorAll("button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); }; });
+const isMainAccount = () => !!USER && !kidLogin;
+
+/* ---------------- tiny DOM helpers ---------------- */
+function E(tag: string, cls: string, parent: HTMLElement, text?: string): HTMLElement {
+  const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; parent.appendChild(el); return el;
 }
-const unlocked = () => !PROFILE?.hash || sessionStorage.getItem("unify.family.unlock") === "1";
-/** parent-only actions ask for the parent PIN first (when the parent set one), once per visit */
-function gate(next: () => void) {
-  if (unlocked()) { next(); return; }
-  card("Parent PIN"); E("p", "fm-sm", panel, "Parents only. Type your parent PIN to continue."); const pin = E("input", "fm-in fm-pin", panel) as HTMLInputElement; pin.type = "password"; pin.inputMode = "numeric"; pin.maxLength = 4; pin.autocomplete = "off"; const err = E("div", "fm-err", panel), row = E("div", "fm-row", panel);
-  const go = E("button", "fm-b go", row, "Unlock"), back = E("button", "fm-b", row, "Back"); back.onclick = () => profiles();
-  const tryIt = async () => { if (!/^\d{4}$/.test(pin.value) || (await hashPin(PROFILE!.salt!, pin.value)) !== PROFILE!.hash) { err.textContent = "That's not the parent PIN."; pin.value = ""; return; } sessionStorage.setItem("unify.family.unlock", "1"); next(); };
-  go.onclick = tryIt; pin.onkeydown = (e) => { if (e.key === "Enter") void tryIt(); }; setTimeout(() => pin.focus(), 50);
+function card(title: string) { panel.innerHTML = ""; E("h1", "fm-t", panel, title); }
+function bubble(parent: HTMLElement, o: { color: string; icon?: string; name: string }) {
+  const b = E("i", "fm-bub", parent, o.icon || o.name.slice(0, 1).toUpperCase()) as HTMLElement;
+  b.style.background = o.color; return b;
+}
+function swatches(parent: HTMLElement, label: string, opts: string[], cur: string, isColor: boolean, cb: (v: string) => void) {
+  E("div", "fm-lab", parent, label); const row = E("div", "fm-sw", parent);
+  for (const v of opts) {
+    const b = E("button", "fm-s" + (v === cur ? " on" : ""), row, isColor ? "" : v);
+    if (isColor) (b as HTMLElement).style.background = v;
+    b.onclick = () => { row.querySelectorAll(".fm-s").forEach((x) => x.classList.remove("on")); b.classList.add("on"); cb(v); };
+  }
+}
+function gradeSelect(parent: HTMLElement, cur: number): HTMLSelectElement {
+  E("div", "fm-lab", parent, "Grade"); const s = E("select", "fm-in", parent) as HTMLSelectElement;
+  for (let g = 0; g <= 12; g++) { const o = E("option", "", s, gradeName(g)); o.setAttribute("value", String(g)); }
+  s.value = String(cur); return s;
 }
 
+/* ---------------- open/close ---------------- */
+function open() { root.classList.add("show"); if (!USER) welcome("up"); else if (kidLogin) void kidHome(); else void checkin(); }
+function close() { root.classList.remove("show"); }
+function paintBtn() {
+  const name = lget().kidName;
+  btn.textContent = USER ? (kidLogin && name ? `👪 ${name}` : "👪 Family") : parentGrade() == null ? "👪 Set grade" : `👪 Grade ${parentGrade() === 0 ? "K" : parentGrade()}`;
+}
+
+/* ---------------- sync: push local progress up, pull cloud progress down ---------------- */
+async function pushNow(): Promise<void> {
+  if (!B || !USER || !activeKid) return;
+  for (const key of SYNC) { const v = readKey(key); if (v) await B.putData(USER.uid, activeKid, key, v); }
+}
+async function pull(uid: string, kid: string, force: boolean): Promise<boolean> {
+  let changed = false;
+  for (const key of SYNC) {
+    const d = await B.getData(uid, kid, key).catch(() => null);
+    if (!d) continue;
+    const cur = readKey(key);
+    if (force || !cur || cur !== d.json) { writeKey(key, d.json); changed = changed || cur !== d.json; }
+  }
+  return changed;
+}
+async function activate(kid: KidDoc | null, importLocal = false): Promise<void> {
+  if (!kid) { activeKid = null; lset({ kid: null, kidName: null }); paintBtn(); return; }
+  if (importLocal && anyLocal()) await pushNow();
+  activeKid = kid.id; lset({ mode: "family", kid: kid.id, kidName: kid.name });
+  if (await pull(USER!.uid, kid.id, true)) location.reload();
+  paintBtn();
+}
+async function refreshClassmates(): Promise<void> {
+  if (!B?.classmates || !USER || !activeKid) return;
+  try { const list = await B.classmates(USER.uid, activeKid); writeKey("unify.classmates", JSON.stringify(list)); } catch { /* offline */ }
+}
+
+/* ---------------- the screens ---------------- */
 function welcome(tab: "in" | "up" | "kid" = "up") {
   card("UNIFY Academy family account");
   E("p", "", panel, "A parent signs up once. Children get their own profile with a PIN, so kids never need an email address, and their progress follows them to any device.");
@@ -243,7 +153,17 @@ function welcome(tab: "in" | "up" | "kid" = "up") {
   const row = E("div", "fm-row", panel); if (tab === "in") { const f = E("button", "fm-b", row, "Forgot password"); f.onclick = async () => { if (!em.value.trim()) { err.textContent = "Type your email first."; return; } try { await B.reset(em.value.trim()); err.style.color = "#2f7a4c"; err.textContent = "Check your email for a reset link."; } catch (e) { err.textContent = errText(e); } }; }
   const gu = E("button", "fm-b", row, "Just try it (guest, nothing saved online)"); gu.onclick = () => { if (lget().mode !== "family") lset({ mode: "guest" }); close(); paintBtn(); };
 }
+function route() { if (!USER) { welcome("up"); return; } void (async () => { try { PROFILE = await B.profile(USER!.uid); } catch { PROFILE = null; } PROFILE_LOADED = true; if (!PROFILE || !PROFILE.hash) parentSetup(false); else profiles(); })(); }
 
+/** parent-only actions ask for the parent PIN first (when the parent set one), once per visit */
+function gate(next: () => void) {
+  if (unlocked()) { next(); return; }
+  card("Parent PIN"); E("p", "fm-sm", panel, "Parents only. Type your parent PIN to continue."); const pin = E("input", "fm-in fm-pin", panel) as HTMLInputElement; pin.type = "password"; pin.inputMode = "numeric"; pin.maxLength = 4; pin.autocomplete = "off"; const err = E("div", "fm-err", panel), row = E("div", "fm-row", panel);
+  const go = E("button", "fm-b go", row, "Unlock"), back = E("button", "fm-b", row, "Back"); back.onclick = () => profiles();
+  const tryIt = async () => { if (!/^\d{4}$/.test(pin.value) || (await hashPin(PROFILE!.salt!, pin.value)) !== PROFILE!.hash) { err.textContent = "That's not the parent PIN."; pin.value = ""; return; } sessionStorage.setItem("unify.family.unlock", "1"); next(); };
+  go.onclick = tryIt; pin.onkeydown = (e) => { if (e.key === "Enter") void tryIt(); }; setTimeout(() => pin.focus(), 50);
+}
+const unlocked = () => !PROFILE?.hash || sessionStorage.getItem("unify.family.unlock") === "1";
 
 /* ---------------- a child who signs in alone: the sign-in itself is the check-in (no PIN) ---------------- */
 function applyKid(s: KidSession, email: string) {
