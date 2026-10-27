@@ -1,0 +1,15 @@
+ < 0.28 ? 1 : 0; }
+      let pose = SEAT.sit; if (s.hand === 1) { pose = s.handT < 0.25 ? SEAT.raiseHalf : SEAT.raiseFull; } else if (s.act && !s.player) pose = Math.floor(this.t * 2.2 + s.c) % 2 ? SEAT.writeA : SEAT.writeB; else if (s.player) pose = SEAT.sit;
+      setPose(b, pose, dirIndex(b.facing, cam, 1)); placeBody(b, false, this.t, true);
+    }
+    this.teacher.bb.mat.color.setScalar(1 - 0.35 * d);
+    if (this.demoModel) { this.demoModel.rotation.y += dt * 0.7; const moon = this.demoModel.getObjectByName("moon"); if (moon) moon.position.set(Math.cos(this.t * 1.3) * 0.6, 0, Math.sin(this.t * 1.3) * 0.6); }
+    // camera
+    if (this.mode === "seat" || this.mode === "free") { /* user driven */ }
+    const des = this.desired(), k = 1 - Math.exp(-dt * (this.mode === "screen" ? 3.5 : 2.6)); this.camPos.lerp(des.p, k); this.camLook.lerp(des.l, k); this.camFov += (des.fov - this.camFov) * k; this.applyCam();
+    { const ps = this.playerSeat; this.pBeam.update(this.t, this.camera, { x: ps.x, y: ps.y - 0.44, z: ps.z }, !!ps.bb.sprite, IS); }
+    if (this.px) { this.px.update(dt, this.t, d); this.px.render(dt); } else this.renderer.render(this.scene, this.camera);
+  } catch (err) { console.warn("class frame", err); }
+    requestAnimationFrame(this.frame);
+  };
+}

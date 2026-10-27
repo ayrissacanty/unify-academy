@@ -1,0 +1,76 @@
+min(1, dt * 6)).normalize(); }
+    t.moving = moving; t.pos.y = groundY(t.pos.z); const b = t.bb, cam = new THREE.Vector3(); this.camera.getWorldDirection(cam); cam.y = 0; if (cam.lengthSq() < 1e-4) cam.set(0, 0, -1); cam.normalize();
+    const dir = dirIndex(t.face, cam, 0); let pose = TEACH.stand; const now = this.t, emoOn = !!t.emo && now < t.emo.until;
+    if (moving) pose = TEACH.walk1 + (Math.floor(t.walkPh) % 4);
+    else if (t.mode === "write") pose = TEACH.write; else if (t.mode === "point") pose = Math.abs(t.face.z) > 0.8 ? TEACH.pointUp : TEACH.point; else if (t.mode === "present") pose = TEACH.present; else if (t.mode === "hold") pose = TEACH.hold;
+    else if (emoOn) pose = t.emo!.g && GESTURE[t.emo!.g] !== undefined ? GESTURE[t.emo!.g] : emoPose(t.emo!.e, t.talking ? (Math.floor(now * 3.4) % 2 ? 1 : 2) : 0);
+    else if (t.talking) {
+      if (now > t.gestT) { const g = t.persona.gestures; t.gest = t.sig && Math.random() < 0.45 ? t.sig : g[Math.floor(Math.random() * g.length)]; t.gestUntil = now + 1.0 + Math.random() * 0.8; t.gestT = now + t.persona.fidget[0] + Math.random() * (t.persona.fidget[1] - t.persona.fidget[0]); }
+      pose = t.gest && now < t.gestUntil && GESTURE[t.gest] !== undefined ? GESTURE[t.gest] : Math.floor(now * 3.4) % 2 ? TEACH.talkA : TEACH.talkB;
+    }
+    if (moving && t.talking) pose = TEACH.walk1 + (Math.floor(t.walkPh) % 4);
+    setPose(b, pose, dir); b.sprite.position.copy(t.pos); if (this.plate) this.plate.position.set(t.pos.x, t.pos.y + 3.55 * (b.h ?? 1) / 1.4 + 0.5, t.pos.z);
+    { const T2 = this.t, k = moving ? 0 : 1; let rot = 0, sy = 1, dy = 0; if (!moving) { if (t.idle === "bounce") dy = Math.abs(Math.sin(T2 * (t.talking ? 5 : 3.2))) * 0.05; else if (t.idle === "sway") rot = Math.sin(T2 * 1.6) * 0.035; else if (t.idle === "nod") sy = 1 + Math.sin(T2 * (t.talking ? 3.4 : 1.8)) * 0.012; else if (t.idle === "tilt") rot = 0.03 + Math.sin(T2 * 0.8) * 0.012; } b.mat.rotation += (rot * k - b.mat.rotation) * 0.15; b.sprite.scale.set(t.base.x, t.base.y * sy, 1); b.sprite.position.y += dy; } b.blob.position.set(t.pos.x, t.pos.y + 0.02, t.pos.z); placeBody(b, moving, this.t, false);
+  }
+
+  /* ------------------------------------------------------------ cameras */
+  setMode(m: CamMode, manual = false) { if (manual) this.auto = false; if (m === "screen" && this.mode !== "screen") this.screenK = 0; this.mode = m; }
+  /** slow dolly toward the screen over `secs` seconds */
+  closeUpScreen(secs: number) { this.mode = "screen"; this.screenK = 0; this.screenRate = 1 / Math.max(2, secs); }
+  setDim(on: boolean) { this.dimT = on ? 1 : 0; }
+  private desired() {
+    const T = this.teacher.pos, p = new THREE.Vector3(), l = new THREE.Vector3(); let fov = 56;
+    switch (this.mode) {
+      case "wide": p.set(0, 3.8, Z1 - 1.0); l.set(0, 1.7, Z0 + 2); fov = 50; break;
+      case "follow": { const f = this.teacher.face; const cx = T.x * 0.55; p.set(cx - f.x * 1.0, T.y + 3.0, Math.min(Z1 - 1, T.z + 6.8)); l.set(cx, T.y + 1.9, T.z - 0.3); fov = 56; break; }
+      case "board-left": p.set(-6.0, 2.6, -3.8); l.set(-6.2, 2.7, Z0); fov = 44; break;
+      case "board-right": p.set(6.0, 2.6, -3.8); l.set(6.2, 2.7, Z0); fov = 44; break;
+      case "screen": { const k = sstep(0, 1, this.screenK); p.set(0, 3.1 - k * 0.15, 2.8 - k * 4.8); l.set(0, 3.05, Z0); fov = 50 - k * 10; break; }
+      case "bulletin": p.set(X1 - 5.2, 2.75, -4.9); l.set(X1, 2.75, -4.9); fov = 40; break;
+      case "demo": p.set(3.6, 2.25, -2.5); l.set(3.6, 1.8, -6.6); fov = 46; break;
+      case "seat": { const s = this.playerSeat; p.set(s.x, s.y + 1.12 / IS, s.z + 0.06); l.set(s.x + Math.sin(this.yaw) * 5, 2.45 + Math.tan(this.pitch) * 6, s.z - Math.cos(this.yaw) * 6); fov = 62; break; }
+      case "free": { const f = this.free; p.set(Math.sin(f.yaw) * Math.cos(f.pitch) * f.dist, 2 + Math.sin(f.pitch) * f.dist, -1.5 + Math.cos(f.yaw) * Math.cos(f.pitch) * f.dist); p.z = Math.min(p.z, Z1 - 0.5); p.y = Math.min(p.y, WALL - 0.45); l.set(0, 2.1, -1.5); fov = 56; break; }
+    }
+    // keep the boards / projector fully in frame whatever the window shape: widen the vertical fov when the window is narrow
+    const asp = this.camera.aspect || 1.6, need = (halfW: number, dist: number) => (2 * Math.atan(Math.tan(Math.atan(halfW / dist)) / asp) * 180) / Math.PI * 1.12, dist = p.distanceTo(l);
+    if (this.mode === "wide") fov = Math.max(fov, need(7.6, dist)); else if (this.mode === "board-left" || this.mode === "board-right") fov = Math.max(fov, need(2.8, dist)); else if (this.mode === "screen") fov = Math.max(fov, need(3.8, dist)); else if (this.mode === "bulletin") fov = Math.max(fov, need(2.0, dist));
+    return { p, l, fov: Math.min(fov, 105) };
+  }
+  private snapCamera() { const d = this.desired(); this.camPos.copy(d.p); this.camLook.copy(d.l); this.camFov = d.fov; this.applyCam(); }
+  private applyCam() { this.camera.position.copy(this.camPos).multiplyScalar(IS); this.camera.fov = this.camFov; this.camera.updateProjectionMatrix(); this.camera.lookAt(this.camLook.clone().multiplyScalar(IS)); }
+
+  /* ------------------------------------------------------------ input */
+  private bindInput(el: HTMLElement) {
+    el.addEventListener("pointerdown", (e) => { const p = this.pointer; p.down = true; p.x = p.sx = e.clientX; p.y = p.sy = e.clientY; p.st = performance.now(); el.setPointerCapture(e.pointerId); });
+    el.addEventListener("pointermove", (e) => {
+      const p = this.pointer; if (p.down) { const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY; if (this.mode === "free") { this.free.yaw -= dx * 0.006; this.free.pitch = Math.max(0.05, Math.min(1.1, this.free.pitch + dy * 0.004)); } else if (this.mode === "seat") { this.yaw = Math.max(-0.9, Math.min(0.9, this.yaw - dx * 0.004)); this.pitch = Math.max(-0.3, Math.min(0.35, this.pitch - dy * 0.003)); } }
+      else if (performance.now() - this.hoverT > 90) { this.hoverT = performance.now(); const hit = this.pick(e.clientX, e.clientY); this.onHover(hit?.label ?? null, e.clientX, e.clientY); }
+    });
+    el.addEventListener("pointerup", (e) => { const p = this.pointer, was = p.down; p.down = false; if (was && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 7 && performance.now() - p.st < 500) { const hit = this.pick(e.clientX, e.clientY); if (hit?.kind === "student") this.onTapStudent(hit.def!); else if (hit?.kind === "teacher") this.onTapTeacher(); else if (hit?.kind === "demo") this.onTapDemo(); else if (hit?.kind === "pic") this.onTapPic(hit.pid!); } });
+    el.addEventListener("pointercancel", () => { this.pointer.down = false; });
+    el.addEventListener("wheel", (e) => { if (this.mode === "free") { e.preventDefault(); this.free.dist = Math.max(5, Math.min(18, this.free.dist * Math.exp(e.deltaY * 0.001))); } }, { passive: false });
+  }
+  private pick(cx: number, cy: number): { kind: "student" | "teacher" | "demo" | "pic"; label: string; def?: NpcDef; pid?: string } | null {
+    const r = this.renderer.domElement.getBoundingClientRect(), nd = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1); this.raycaster.setFromCamera(nd, this.camera);
+    const sprites: THREE.Object3D[] = [this.teacher.bb.sprite, ...this.seats.filter((s) => !s.player).map((s) => s.bb.sprite)]; const hits = this.raycaster.intersectObjects(sprites, false);
+    if (hits.length) { const o = hits[0].object; if (o === this.teacher.bb.sprite) return { kind: "teacher", label: TEACHER_BY_SUBJECT[this.subject].name }; const s = this.seats.find((x) => x.bb.sprite === o); if (s?.def) return { kind: "student", label: `${s.def.name} (grade ${s.def.grade})`, def: s.def }; }
+    const dh = this.raycaster.intersectObjects(this.demo.children, true); if (dh.length) return { kind: "demo", label: "Interactive 3D example: click to try" };
+    const ph = this.raycaster.intersectObjects(this.wallPics, false); if (ph.length) { const u = ph[0].object.userData; return { kind: "pic", label: `Picture: ${u.title}. Click to enlarge`, pid: u.pid }; }
+    return null;
+  }
+
+  /* ------------------------------------------------------------ frame */
+  private frame = (now: number) => { try {
+    const raw = now - this.last, dt = Math.min(0.05, raw / 1000); this.last = now; this.t += dt; Gfx.tick(raw);
+    if ((this.todT -= dt) < 0) { this.todT = 5; this.tod = Mood.realTod(); } Mood.update(dt, this.todParam ?? this.tod); this.fx.tick(this.t);
+    this.boardL.update(dt); this.boardR.update(dt); this.projector.update(dt); this.pet.tick(dt);
+    if (this.mode === "screen") this.screenK = Math.min(1, this.screenK + dt * this.screenRate);
+    // lighting: ease toward dim / bright
+    this.dim += (this.dimT - this.dim) * Math.min(1, dt * 1.6); const d = this.dim, L = this.lights;
+    const kp = this.px?.k ?? { hemi: 1, sun: 1 }; L.hemi.intensity = (1.8 - 1.4 * d) * Mood.hemiK * kp.hemi; L.sun.intensity = (1.45 - 1.25 * d) * Mood.sunK * kp.sun; L.spot.intensity = 70 * d; (L.beam.material as THREE.MeshBasicMaterial).opacity = 0.075 * d; (L.glow.material as THREE.MeshBasicMaterial).opacity = 0.1 * d; L.ceil.color.setRGB(1, 1, 1).lerp(Mood.lamp, Mood.glow * 0.7).multiplyScalar(1 - 0.78 * d);
+    (this.scene.background as THREE.Color).copy(Mood.sky).multiplyScalar(1 - 0.7 * d); const tint = 1 - 0.62 * d;
+    this.boardMats.forEach((m) => m.color.setScalar(1 - 0.6 * d)); this.updateTeacher(dt);
+    const cam = new THREE.Vector3(); this.camera.getWorldDirection(cam); cam.y = 0; if (cam.lengthSq() < 1e-4) cam.set(0, 0, -1); cam.normalize();
+    for (const s of this.seats) {
+      const b = s.bb; if (!b.sprite) continue; b.sprite.visible = b.blob.visible = !s.c3; b.mat.color.setScalar(tint);
+      s.handT += dt; s.actT -= dt; if (s.actT <= 0) { s.actT = 1.5 + Math.random() * 4; s.act = Math.random()
