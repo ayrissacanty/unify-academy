@@ -1,0 +1,67 @@
+i = 0; i < 4; i++) add(new THREE.ConeGeometry(0.04, 0.12, 6), "#8FC9E8", -0.2 + i * 0.13, -0.1 - (i % 2) * 0.12, 0).rotation.z = Math.PI; }
+    else if (id === "gravity") { add(new THREE.SphereGeometry(0.3, 16, 12), "#4F91C7"); const moon = add(new THREE.SphereGeometry(0.1, 12, 10), "#EDE2CF", 0.6, 0, 0); moon.name = "moon"; }
+    else if (id === "printing") { add(new THREE.BoxGeometry(0.7, 0.1, 0.5), "#6b3f28", 0, -0.35, 0); for (const sx of [-0.28, 0.28]) add(new THREE.BoxGeometry(0.07, 0.6, 0.07), "#9A653D", sx, -0.05, 0); add(new THREE.BoxGeometry(0.7, 0.07, 0.1), "#9A653D", 0, 0.27, 0); add(new THREE.BoxGeometry(0.4, 0.08, 0.3), "#9DA7AA", 0, -0.1, 0); }
+    else if (id === "bill" || id === "branches" || id === "election") { add(new THREE.BoxGeometry(0.8, 0.3, 0.45), "#FFF9F0", 0, -0.25, 0); for (let i = 0; i < 5; i++) add(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 8), "#EDE2CF", -0.28 + i * 0.14, 0.05, 0.2); add(new THREE.SphereGeometry(0.2, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), "#EDE2CF", 0, 0.25, 0); }
+    else if (id === "silkroad") { add(new THREE.SphereGeometry(0.34, 16, 12), "#4F91C7"); add(new THREE.TorusGeometry(0.4, 0.015, 6, 28), "#EAB94E").rotation.x = Math.PI / 2; add(new THREE.BoxGeometry(0.2, 0.12, 0.12), "#E9515D", 0.3, 0.1, 0.1); }
+    else if (id === "theme" || id === "figurative") { add(new THREE.BoxGeometry(0.4, 0.05, 0.55), "#E07A66", -0.2, 0, 0).rotation.z = 0.25; add(new THREE.BoxGeometry(0.4, 0.05, 0.55), "#4F91C7", 0.2, 0, 0).rotation.z = -0.25; }
+    else if (id === "orchestra" || id === "rhythm") { add(new THREE.CylinderGeometry(0.28, 0.28, 0.28, 18), "#E9515D", 0, -0.2, 0); add(new THREE.CylinderGeometry(0.29, 0.29, 0.03, 18), "#fff6ea", 0, -0.05, 0); for (let i = 0; i < 3; i++) add(new THREE.SphereGeometry(0.06, 10, 8), ["#F8D977", "#4F91C7", "#88B89A"][i], -0.25 + i * 0.25, 0.25 + (i % 2) * 0.1, 0); }
+    else if (id === "colormix" || id === "perspective") { add(new THREE.CylinderGeometry(0.4, 0.4, 0.05, 24), "#E8C39A"); for (let i = 0; i < 4; i++) add(new THREE.SphereGeometry(0.08, 10, 8), ["#E9515D", "#F8D977", "#4F91C7", "#5FAE6A"][i], -0.22 + i * 0.15, 0.08, (i % 2) * 0.1); }
+    else if (id === "life") { add(new THREE.BoxGeometry(0.5, 0.34, 0.36), "#C98569", 0, -0.3, 0); add(new THREE.BoxGeometry(0.54, 0.06, 0.4), "#9A653D", 0, -0.1, 0); add(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 12), "#EAB94E", -0.15, 0.02, 0.05); add(new THREE.SphereGeometry(0.09, 12, 10), "#D9564A", 0.12, 0.02, 0.0); add(new THREE.BoxGeometry(0.24, 0.02, 0.18), "#5E9C72", 0.1, -0.06, 0.1); }
+    else if (id === "careers") { add(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 8), "#9A653D", 0, -0.1, 0); [["#E07A66", 0.28, 0.1, 0.25], ["#4F91C7", 0.12, -0.05, -0.3], ["#88B89A", 0.38, -0.2, 0.1]].forEach(([c, y, rot, x]: any, i) => { const b = add(new THREE.BoxGeometry(0.42, 0.12, 0.04), c, x * 0.3, y - 0.05 + i * 0.06 - 0.1, 0.03); b.rotation.y = rot; }); add(new THREE.SphereGeometry(0.06, 10, 8), "#EAB94E", 0, 0.38, 0); }
+    else add(new THREE.IcosahedronGeometry(0.3, 0), "#B8A8DA");
+    return g;
+  }
+
+  /* ------------------------------------------------------------ teacher: fluid walking on a nav grid */
+  private buildNav() {
+    const c = this.cell, nx = this.nx = Math.ceil((X1 - X0) / c), nz = this.nz = Math.ceil((Z1 - Z0) / c), blocked: number[][] = [];
+    const pad = 0.12; for (let r = 0; r < ROWS; r++) for (let k = 0; k < COLS; k++) { const x = XS[k], z = rowZ(r); blocked.push([x - 0.68 - pad, z - 0.76 - pad, x + 0.68 + pad, z + 0.62 + pad]); }
+    blocked.push([-4.1, -8.5, -1.9, -7.2], [3.0, -7.3, 4.2, -6.0], [X0, -7.9, X0 + 1.0, -4.4], [7.7, -9.2, 8.7, -8.0], [X0, 8.1, X0 + 3.4, Z1], [X1 - 2.6, 8.4, X1, Z1], [X0, 8.5, X1, Z1 - 0.2]);
+    blocked[blocked.length - 1] = [X0, 9.0, X1, Z1];
+    this.nav = Array.from({ length: nz }, (_, j) => Array.from({ length: nx }, (_, i) => { const x = X0 + (i + 0.5) * c, z = Z0 + (j + 0.5) * c; if (x < X0 + 0.3 || x > X1 - 0.3 || z < Z0 + 0.4 || z > Z1 - 0.3) return "#"; return blocked.some((b) => x > b[0] && x < b[2] && z > b[1] && z < b[3]) ? "#" : "."; }).join(""));
+  }
+  private tile(x: number, z: number) { return { i: Math.max(0, Math.min(this.nx - 1, Math.floor((x - X0) / this.cell))), j: Math.max(0, Math.min(this.nz - 1, Math.floor((z - Z0) / this.cell))) }; }
+  private clear(a: { x: number; z: number }, b: { x: number; z: number }) { const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.15); for (let k = 1; k < n; k++) { const x = a.x + ((b.x - a.x) * k) / n, z = a.z + ((b.z - a.z) * k) / n, t = this.tile(x, z); if (this.nav[t.j][t.i] === "#") return false; } return true; }
+  private buildTeacher(def: NpcDef) {
+    if (this.teacher) this.disposeBB(this.teacher.bb);
+    const persona = personaOf(def.faculty ?? def.personality), bb = makeBillboard(this.scene, { ...def.look, emote: persona.base }, TEACH_POSES, this.blobTex); const pos = this.teacher?.pos ?? new THREE.Vector3(SPOTS.center.x, STAGE_H, SPOTS.center.z);
+    this.teacher = { bb, pos, path: [], face: new THREE.Vector3(0, 0, 1), speed: 0, talking: false, mode: "idle", res: null, walkPh: 0, faceTo: null, moving: false, def, persona, idle: FACULTY_BY_ID[def.faculty ?? ""]?.idle ?? "still", sig: FACULTY_BY_ID[def.faculty ?? ""]?.sig ?? null, base: bb.sprite.scale.clone(), emo: null, gest: null, gestUntil: 0, gestT: 2, wrongs: 0 };
+    voice.mood = (d) => (d.id === def.id && this.teacher?.emo && this.t < this.teacher.emo.until ? this.teacher.emo.e : d.id === def.id ? persona.base : "neutral");
+  }
+  private plate: THREE.Sprite | null = null;
+  /** a bold name plate that follows the teacher so you always know who is speaking */
+  private makePlate(def: NpcDef) {
+    if (this.plate) { this.scene.remove(this.plate); (this.plate.material as THREE.SpriteMaterial).map?.dispose(); }
+    const cv = document.createElement("canvas"); cv.width = 512; cv.height = 112; const c = cv.getContext("2d")!; c.fillStyle = "#E8A33D"; c.beginPath(); c.roundRect(4, 6, 504, 100, 30); c.fill(); c.lineWidth = 7; c.strokeStyle = "#8a5f1c"; c.stroke();
+    c.fillStyle = "#fff"; c.font = "700 46px 'Trebuchet MS',sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(def.name.length > 18 ? def.first : def.name, 256, 46); c.font = "600 26px 'Trebuchet MS',sans-serif"; c.fillText((def.title ?? "Teacher").slice(0, 30), 256, 84);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); sp.scale.set(2.3, 0.5, 1); sp.renderOrder = 20; this.scene.add(sp); this.plate = sp;
+  }
+  setTeacher(def: NpcDef) { this.buildTeacher(def); this.makePlate(def); this.px?.syncTeacher(); }
+  /** walk to a named spot or point; resolves on arrival; the camera can follow */
+  walkTo(spot: string | { x: number; z: number }, face?: [number, number]): Promise<void> {
+    const t = this.teacher, s = typeof spot === "string" ? SPOTS[spot] : spot, dest = { x: s.x, z: s.z }, f = face ?? (typeof spot === "string" ? SPOTS[spot].face : undefined);
+    const a = this.tile(t.pos.x, t.pos.z), b = this.tile(dest.x, dest.z); const tiles = astar(this.nav, a.i, a.j, b.i, b.j); const raw = [{ x: t.pos.x, z: t.pos.z }, ...tiles.map((q) => ({ x: X0 + (q.x + 0.5) * this.cell, z: Z0 + (q.y + 0.5) * this.cell }))];
+    if (tiles.length) raw[raw.length - 1] = dest; else if (a.i !== b.i || a.j !== b.j) { /* blocked target: stay */ return Promise.resolve(); }
+    const pts: { x: number; z: number }[] = []; for (let i = 0; i < raw.length - 1;) { let j = raw.length - 1; while (j > i + 1 && !this.clear(raw[i], raw[j])) j--; pts.push(raw[j]); i = j; }
+    t.path = pts; t.faceTo = f ? new THREE.Vector3(f[0], 0, f[1]).normalize() : null; t.mode = "idle"; return new Promise((r) => { t.res?.(); t.res = r; if (!pts.length) { t.res = null; r(); } });
+  }
+  setTeacherMode(mode: TeacherState["mode"], face?: [number, number]) { const t = this.teacher; t.mode = mode; if (face) t.faceTo = new THREE.Vector3(face[0], 0, face[1]).normalize(); }
+  setTalking(on: boolean) { this.teacher.talking = on; }
+  /** show a feeling (and optionally a gesture) for a while */
+  emote(e: Emotion, ms = 2600, g: string | null = null) { this.teacher.emo = { e, g, until: this.t + ms / 1000 }; }
+  /** the teacher reacts in character; returns a short spoken interjection to put in front of the reply (may be "") */
+  react(kind: Reaction): string {
+    const T = this.teacher; let k: Reaction = kind;
+    if (kind === "wrong") { T.wrongs++; if (T.wrongs >= 2) { k = "wrongAgain"; T.wrongs = 0; } } else if (kind === "correct") T.wrongs = 0;
+    const r = T.persona.r[k]; this.emote(r.e, r.ms, r.g ?? null); return r.lines[Math.floor(Math.random() * r.lines.length)] ?? "";
+  }
+  get teacherMoving() { return this.teacher.path.length > 0; }
+  private updateTeacher(dt: number) {
+    const t = this.teacher; let moving = false;
+    if (t.path.length) {
+      const tgt = t.path[0], dx = tgt.x - t.pos.x, dz = tgt.z - t.pos.z, d = Math.hypot(dx, dz), remain = t.path.reduce((n, p, i) => n + (i === 0 ? d : Math.hypot(p.x - t.path[i - 1].x, p.z - t.path[i - 1].z)), 0);
+      const want = Math.min(1.55 * t.persona.walk, 0.35 + remain * 0.9) ; t.speed += (want - t.speed) * Math.min(1, dt * 4); const step = Math.min(d, t.speed * dt);
+      if (d < 0.04 || step >= d) { t.pos.x = tgt.x; t.pos.z = tgt.z; t.path.shift(); } else { t.pos.x += (dx / d) * step; t.pos.z += (dz / d) * step; const f = new THREE.Vector3(dx / d, 0, dz / d); t.face.lerp(f, Math.min(1, dt * 8)).normalize(); }
+      moving = true; t.walkPh += dt * (3 + t.speed * 3.2);
+      if (!t.path.length) { t.speed = 0; const r = t.res; t.res = null; r?.(); }
+    } else { t.speed = 0; if (t.faceTo) t.face.lerp(t.faceTo, Math.
