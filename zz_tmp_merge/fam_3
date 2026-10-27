@@ -1,0 +1,103 @@
+
+  show(`<h2>${k ? "Edit " + k.name : "Add a child"}</h2>
+  <div class="fm-lab">Nickname (what friends see)</div><input class="fm-in" id="fN" maxlength="16" value="${(k?.name ?? "").replace(/"/g, "&quot;")}">
+  <div class="fm-lab">Age band</div><div class="fm-row" id="fA"></div>
+  <div class="fm-lab">Grade (K, 5 means Kindergarten, grade 5)</div><div class="fm-row" id="fG"></div>
+  <div class="fm-lab">Color</div><div class="fm-sw" id="fC"></div>
+  <div class="fm-lab">4-digit code (they type this to play)</div><input class="fm-in fm-pin" id="fPin" inputmode="numeric" maxlength="4" placeholder="${k ? "unchanged" : ""}" autocomplete="off">
+  <div class="fm-err" id="fX"></div><div class="fm-row"><button class="fm-b pri" id="fSave">Save</button><button class="fm-b" id="fBack">Back</button></div>
+  ${k && B.createKidLogin ? `<div class="fm-bot" style="flex-direction:column;align-items:stretch"><div class="fm-lab">Student sign-in (optional): an address like <b>ava@unify.academy</b> and a password so this child can sign in on their own device without the parent password.</div><div class="fm-row"><input class="fm-in" id="fL" style="flex:1" maxlength="20" placeholder="first name" value="${(k.login_email ? k.login_email.split("@")[0] : "").replace(/"/g, "&quot;")}"><span>@unify.academy</span></div><div class="fm-row"><input class="fm-in" id="fKP" style="flex:1" maxlength="72" placeholder="password (8+ characters)" autocomplete="off"><button class="fm-b" id="fMake">${k.login_email ? "Change" : "Create"}</button><button class="fm-b" id="fRm" ${k.login_email ? "" : "disabled"}>Remove</button></div><div class="fm-sm" id="fKS"></div></div>` : ""}`);
+  let age = k?.age ?? "6-8", grade = k?.grade ?? 0, color = k?.color ?? COLORS[KIDS.length % COLORS.length];
+  const aa = panel.querySelector("#fA") as HTMLElement; for (const a of ["3-5", "6-8", "9-11", "12+"]) { const b = E("button", "fm-b" + (a === age ? " pri" : ""), aa, a); b.onclick = () => { age = a; aa.querySelectorAll("button").forEach((x) => x.classList.remove("pri")); b.classList.add("pri"); }; }
+  const gg = panel.querySelector("#fG") as HTMLElement; for (let g = 0; g <= 8; g++) { const b = E("button", "fm-b" + (g === grade ? " pri" : ""), gg, g ? String(g) : "K"); b.onclick = () => { grade = g; gg.querySelectorAll("button").forEach((x) => x.classList.remove("pri")); b.classList.add("pri"); }; }
+  const cc = panel.querySelector("#fC") as HTMLElement; for (const c of COLORS) { const b = E("button", c === color ? "on" : "", cc); b.style.background = c; b.onclick = () => { color = c; cc.querySelectorAll("button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); }; }
+  (panel.querySelector("#fBack") as HTMLButtonElement).onclick = () => scrKids();
+  const kidMsg = (m: string) => { const el = panel.querySelector("#fKS") as HTMLElement | null; if (el) el.textContent = m; };
+  if (k && B.createKidLogin) {
+    if (k.login_email) kidMsg(`Signs in as ${k.login_email}`);
+    (panel.querySelector("#fMake") as HTMLButtonElement).onclick = async () => {
+      const local = (panel.querySelector("#fL") as HTMLInputElement).value.trim().toLowerCase().replace(/[^a-z0-9.+-]/g, ""), pw = (panel.querySelector("#fKP") as HTMLInputElement).value;
+      if (!local) return kidMsg("Type a first name for the address."); if (pw.length < 8) return kidMsg("The password needs 8+ characters.");
+      try { const email = await B.createKidLogin!(k.id, local, pw); k.login_email = email; kidMsg(`Done! Signs in as ${email}`); }
+      catch (e) { kidMsg(errText(e)); }
+    };
+    (panel.querySelector("#fRm") as HTMLButtonElement).onclick = async () => { try { await B.removeKidLogin!(k.id); k.login_email = null; kidMsg("Removed."); } catch (e) { kidMsg(errText(e)); } };
+  }
+  (panel.querySelector("#fSave") as HTMLButtonElement).onclick = async () => {
+    const name = (panel.querySelector("#fN") as HTMLInputElement).value.trim(), pin = (panel.querySelector("#fPin") as HTMLInputElement).value, x = panel.querySelector("#fX") as HTMLElement;
+    if (!name) { x.textContent = "They need a nickname."; return; }
+    if (!k && !/^\d{4}$/.test(pin)) { x.textContent = "Pick a 4-digit code."; return; }
+    if (pin && !/^\d{4}$/.test(pin)) { x.textContent = "The code is 4 digits."; return; }
+    const doc: KidDoc = k ?? { id: "k" + rnd(6), name, age, salt: "", hash: "", created: Date.now() };
+    doc.name = name; doc.age = age; doc.grade = grade; doc.color = color;
+    if (pin) { doc.salt = rnd(8); doc.hash = await hashPin(doc.salt, pin); }
+    try { await B.saveKid(USER!.uid, doc); } catch (e) { x.textContent = errText(e); return; }
+    if (!k) KIDS.push(doc);
+    scrKids();
+  };
+}
+function scrReport(kidId: string) {
+  const k = KIDS.find((x) => x.id === kidId), l = lget();
+  const own = l.mode === "family" && l.kid === kidId;
+  show(`<h2>${k ? k.name + "'s report" : "Report"}</h2><div id="fR"></div><div class="fm-row"><button class="fm-b" id="fBack">Back</button></div>`);
+  (panel.querySelector("#fBack") as HTMLButtonElement).onclick = () => route();
+  const box = panel.querySelector("#fR") as HTMLElement;
+  if (!own) { E("p", "", box, "Reports show the progress saved on this device. Ask them to open this on their own tablet to see theirs."); return; }
+  const rows = gradesFromState();
+  if (!rows.length) { E("p", "", box, "No graded work yet. Finish a class to see grades here."); return; }
+  const t = E("table", "fm-tb", box); t.innerHTML = "<tr><th>Subject</th><th>Grade</th><th>Done</th></tr>";
+  for (const [sub, g, n] of rows) { const tr = E("tr", "", t); E("td", "", tr, SUBJECT_NAME[sub] ?? sub); E("td", "", tr, g); E("td", "", tr, String(n)); }
+}
+
+/* ---------------- the always-visible corner button ---------------- */
+function buttonRefresh() {
+  if (!btn) return; const l = lget();
+  if (l.mode === "family" && l.kidName) { btn.textContent = (l.kidName[0] || "?").toUpperCase(); btn.style.background = kidColor(); btn.style.color = "#fff"; btn.title = `${l.kidName} (family account) ${syncMsg}`; }
+  else { btn.textContent = "\u{1F46A}"; btn.style.background = ""; btn.style.color = ""; btn.title = "Family accounts"; }
+}
+
+/** child-side sign-in: pick the family's child after a successful kid login */
+function scrKidPick() {
+  show(`<h2>Hi ${kidName() ?? ""}!</h2><p>You are signed in on your own device. Your progress saves to your family automatically.</p>
+  <div class="fm-row"><button class="fm-b pri" id="fPlay">Play</button><button class="fm-b" id="fOut">Sign out</button></div><div class="fm-sm" id="fMsg">${syncMsg}</div>`);
+  (panel.querySelector("#fPlay") as HTMLButtonElement).onclick = close;
+  (panel.querySelector("#fOut") as HTMLButtonElement).onclick = async () => { await B.signOut(); kidLogin = false; signOutToGuest(); close(); };
+}
+/** the child's own sign-in from the start screen (academy address + password, no parent needed) */
+export async function kidSignIn(email: string, password: string): Promise<string | null> {
+  if (!B.signInKid) return "Student sign-in isn't set up here.";
+  try { kidSigningIn = true; const s = await B.signInKid(email, password); kidLogin = true; USER = { uid: s.family, email: null, verified: true }; KIDS = [s.kid]; await loadKid(s.kid); return null; }
+  catch (e) { return errText(e); } finally { kidSigningIn = false; }
+}
+
+/* ---------------- boot ---------------- */
+export function initFamily(opts: { anchor?: HTMLElement } = {}) {
+  const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st);
+  root = E("div", "", document.body); root.id = "fam"; panel = E("div", "fm-p", root);
+  root.addEventListener("click", (e) => { if (e.target === root) close(); });
+  btn = E("button", "fm-fambtn", opts.anchor ?? document.body) as HTMLButtonElement;
+  btn.id = "famBtn"; btn.style.cssText = "position:fixed;top:10px;right:10px;z-index:110;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.8);background:#FFF9F0;font-size:20px;cursor:pointer;box-shadow:0 2px 0 var(--edge,#C9B28A)";
+  btn.onclick = () => openFamily();
+  B = (window as any).__FAMILY_BACKEND ?? (((window as any).__supaReady ? supabaseBackend() : null) as Backend);
+  buttonRefresh();
+  if (!B) return;
+  B.onUser(async (u) => {
+    if (kidSigningIn) return;                      // the child's own sign-in flow handles itself
+    USER = u; kidLogin = false;
+    if (u) {
+      try { PROFILE = await B.profile(u.uid); PROFILE_LOADED = true; } catch { PROFILE_LOADED = true; }
+      try { KIDS = await B.kids(u.uid); } catch { KIDS = []; }
+      // did this device belong to one of these children?
+      const l = lget();
+      if (l.mode === "family" && l.kid && !KIDS.some((k) => k.id === l.kid)) signOutToGuest();
+      else if (l.mode === "family" && l.kid) { const k = KIDS.find((x) => x.id === l.kid)!; activeKid = k.id; void syncNow("init"); }
+      // a kid sign-in that lands here means a child typed an academy address into the parent form
+      if (!kidLogin && B.kidLogin) { try { const s = await B.kidLogin(); if (s) { kidLogin = true; USER = { uid: s.family, email: null, verified: true }; KIDS = [s.kid]; await loadKid(s.kid); } } catch { /* not a kid */ } }
+    } else { KIDS = []; }
+    buttonRefresh();
+  });
+  // save whenever the tab hides, and every 40 s while it shows
+  let vis = true; document.addEventListener("visibilitychange", () => { vis = !document.hidden; if (!vis) void syncNow("hide"); });
+  setInterval(() => { if (vis) void syncNow("tick"); }, 40000);
+  addEventListener("unify:progress", () => void syncNow("progress"));
+}
