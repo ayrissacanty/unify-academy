@@ -1,100 +1,115 @@
-# UNIFY Academy
+/** The "Today" panel: daily quests + streak + Spirit Meter, this week's event (join it your way or skip it), your collection (locker + Chat Chow items),
+ *  look & sound settings (decorations, local weather, quiet mode) and a grown-ups tab (time, friends, blocks, approved hosts, limits). */
+import { World, THEMES, describe, enableLocal, disableLocal, themeOf } from "../game/world";
+import { Events, EVENTS, eventThisWeek, type EventDef } from "../game/events";
+import { Cosm, ITEMS, type Slot } from "../game/cosmetics";
+import { Quests, todays, SPIRIT_GOAL } from "../game/quests";
+import { Safety, parentUnlocked } from "../game/safety";
+import { communityTab } from "./communityui";
+import { Progress, ALL_SUBJECTS, SUBJECT_NAME } from "../game/progress";
+import { CURRICULUM } from "../class3d/curriculum";
+import { stampBar, readLessonCounts } from "../game/stamps";
+import { loadPet, petMood } from "../class3d/pet";
+const CSS = `.hb{position:fixed;inset:0;z-index:70;background:rgba(74,59,63,.45);display:none;align-items:center;justify-content:center;font-family:"Fredoka","Trebuchet MS",system-ui,sans-serif;color:#4A3B3F}.hb.show{display:flex}
+.hb-p{background:#F3E7CF;border:1px solid #fff;border-radius:20px;box-shadow:0 3px 0 #C9B28A,0 18px 36px rgba(0,0,0,.4);width:min(720px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+.hb-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #C9B28A}.hb-h h2{font-size:20px;flex:1}.hb-t{display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap}
+.hb-b{font:inherit;font-size:14px;background:#FFF9F0;border:1px solid #fff;border-radius:11px;padding:6px 12px;min-height:36px;cursor:pointer;box-shadow:0 2px 0 #C9B28A;color:#4A3B3F}.hb-b.on{background:#E07A66;color:#fff}.hb-b.go{background:#5FB37A;color:#fff}.hb-b.sm{min-height:30px;font-size:12px;padding:3px 9px}
+.hb-body{padding:6px 14px 16px;overflow:auto}.hb-body h3{font-size:15px;margin:10px 0 4px}.hb-card{background:#FFF9F0;border-radius:14px;padding:10px 12px;margin:6px 0;box-shadow:0 2px 0 #C9B28A}.hb-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.hb-bar{height:12px;border-radius:99px;background:#E7D7B6;overflow:hidden}.hb-bar i{display:block;height:100%;background:linear-gradient(90deg,#EAB94E,#E8604C)}.hb small{color:#8A7A70}
+.hb-q{display:flex;gap:10px;align-items:center}.hb-q .ic{font-size:26px}.hb-q.done{opacity:.6}.hb-q.done b:after{content:" ✔";color:#2f7a4c}
+.hb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}.hb-it{background:#FFF9F0;border-radius:12px;padding:8px;text-align:center;font-size:12px;box-shadow:0 2px 0 #C9B28A;cursor:pointer;border:2px solid transparent}.hb-it.eq{border-color:#E07A66}.hb-it.lock{opacity:.4;cursor:default}.hb-it .art{font-size:28px;display:block;height:38px;line-height:38px;border-radius:8px;margin-bottom:3px}
+.hb select,.hb input[type=text]{font:inherit;font-size:14px;padding:6px 8px;border-radius:9px;border:1px solid #C9B28A;background:#fff;color:#4A3B3F}.hb label{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:14px}.hb-toast{position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:90;background:#5FB37A;color:#fff;border-radius:14px;padding:10px 16px;font-weight:600;box-shadow:0 8px 20px rgba(0,0,0,.3);font-family:"Fredoka",sans-serif;max-width:92vw;text-align:center}`;
+const E = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text = "") => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; parent?.appendChild(e); return e; };
+let root: HTMLElement | null = null, styled = false;
+export interface HubHooks { openGames?: () => void; openTrip?: () => void; goTo?: (k: string) => void; onClose?: () => void; applyTheme?: () => void }
+export function toast(msg: string) { const t = E("div", "hb-toast", document.body, msg); setTimeout(() => t.remove(), 3800); }
+// celebrate finished quests anywhere in the game
+if (typeof addEventListener === "function") addEventListener("unify:quest-done", (e: any) => { const r = e.detail; toast(`⭐ Quest done: ${r.quest.text}! +${r.spirit} spirit${r.item ? ` · You got: ${r.item.art} ${r.item.name}` : ""}${r.streak > 1 ? ` · ${r.streak}-day streak!` : ""}`); });
 
-One web app in one **paper-cut isometric** art style: a hallway, four lecture auditoriums and a live newsroom.
-Run it: `npm install && npm start` → http://localhost:8787
-
-| Piece | Files | What it is |
-|---|---|---|
-| **Shell** | `index.html` | Tabs and hand-offs between the pieces below |
-| **Hallway** | `hallway3d.html`, `src/hall3d/*` | Perspective 3D paper-cut **indoor campus** (Three.js): a ring corridor with locker runs around four subject blocks (Math, ELA, Science, History) and a central plaza with fountain, trees and tables, ringed by lawn, trees and houses outside the walls. Orbit camera (drag, Q/E, on-screen buttons, wheel zoom) plus overview and first-person views; a **Go to** menu auto-walks you to a class door (or the **Newsroom** door in the north wall) and opens it; 20 students in K-2 / 3-5 / 6-8 / high-school size bands plus two adult staff (hall monitor and teacher) on a clock/schedule with A* pathing; a walkable player (WASD / arrows / touch pad, camera-relative). The earlier isometric version is still in `hallway.html` + `src/game/scenes/HallwayScene.ts` |
-| **Auditorium** | `auditorium.html`, `src/game/scenes/AuditoriumScene.ts` | Phaser isometric lecture hall: 50 seated NPCs, raised stage, projector, first-person seat view |
-| **Newsroom** | `news.html`, `src/news/*` | Live studio: two chibi anchors, weather map, ticker, and a **generated paper-cut video for every field report** (no cap on how many) |
-| **Classroom 3D** | `classroom3d.html`, `src/class3d/*` | Straight-on Three.js classroom (default for lessons; Isometric view button switches to the Phaser auditorium). Decorated room, two whiteboards the teacher writes on (key points left, worked examples right), a ceiling projector and screen that show live pictures and 19 generated reenactment videos (history, government, science, music, art, math, ELA; characters act out scenes and events). The lesson director has the teacher walk and point at the clip title card, dim the lights and slowly close in on the screen while the video plays, then walk the aisles discussing it with a follow camera. Camera buttons: auto, wide, follow, boards, projector, 3D example, own seat, free orbit. 11 interactive examples (3D cell and pyramid explorers, parabola, pizza fractions, story/sort games, rhythm, color mixing, election, gravity, photosynthesis, printing press) can be done alone or with a classmate who remembers it |
-| **People** | `src/hall3d/{rig,avatar,avatarui,roster,social,dialogue,chatui,hallsocial}.ts`, `src/game/{classroom,lessons,runtimeChars}.ts` | Avatar creator, 56 unique named NPCs with memory, two-way conversations, hand-raise Q&A |
-| **Flip phone** | `phone.html` | 2D clamshell that opens two ways (flip-up or sideways swivel; drag/swipe the cover, buttons, or keys O / ← →). D-pad + number keypad or touch. Apps: Messages (family, the real teachers and all 56 named NPC students from the roster, friends first with hearts; NPC texts use the same dialogue engine, optional `/api/chat` model and friendship memory as in-game talks, so they remember each other; live class chat between tabs), Calendar + Sheets (local, or Google via an OAuth Client ID in Settings), school schedule (same bell schedule as the hallway), Dictionary + Thesaurus (dictionaryapi.dev + Datamuse, offline fallback), Calculator, Reminders (alerts on the cover screen), Repos (GitHub API). Shell: 📱 button or P. Also a standalone installable web app at `/phone` (PWA: `phone.webmanifest`, `phone-sw.js` offline shell, `phone-icon.svg`; Netlify build includes it). Also: Homework app (streak, subject colors; the teacher's end-of-class homework lands here), favorites row and home pages, real faces for NPC contacts, send a news story to a friend, captions + read-aloud narration for report videos (the video's mute button mutes the voice), quiet hours, a PIN for Settings, dark mode and larger text, touch buttons in place of the keypad (automatic on touch screens), and a read-only parent page (`parent.html?code=…`, homework, schedule and events only, never chats). Optional cloud save (Settings, off by default): anonymous Firebase sign-in, one private document per player at `users/{uid}/phone/state` (chats, reminders, events, sheet, name/grade/sound; never tokens), Google sign-in to carry it between devices, and a delete button. Config in `firebase-config.js`, security rules in `firestore.rules` (paste into the Firebase console). Game events reach it through the shell (`unify:event` becomes `phone:event`): the teacher's end-of-class homework (text + Reminder + Calendar entry) is the only automatic text; the phone never texts you on its own otherwise. Also the game clock and an unread badge on the 📱 button. Host messages: `phone:clock {minutes}`, `phone:message {from,text}`, `phone:event`, `phone:open` |
-| **Feed service** | `server/server.mjs` | Static server + `/api/broadcast` (weather + every local/national/world story for the viewer's place and AM/PM edition) + optional `/api/chat` |
-| **Art pipeline** | `tools/` | Python (Pillow + numpy) generators for every PNG, with the paper-cut finish applied on save |
-
-## How they connect
-- **Hallway → Auditorium.** Every classroom is a lecture auditorium (`docs/UNIFY_AUDITORIUM_BIBLE_UPDATE.md`). Walk into a doorway and the hallway posts `unify:enter`; the shell opens the auditorium and starts that subject (`unify:lesson`). Each block has one door with its subject sign, so any class is reachable at any time (use **Go to** to walk there). Students walk to the doors during class and fill the hall at arrival, lunch and dismissal. **Leave auditorium** (or Esc) returns you to the spot in front of the door.
-- **Newsroom.** `news.html` calls `/api/broadcast` on the same origin; without it the page shows sample content (badge: `SAMPLE DATA` / `LIVE FEED`).
-  - *Where and when:* the page asks for the browser's location once (or take a typed city), sends `lat/lon/tz`, and the server returns that place's **morning or evening edition** (AM = since 6 pm yesterday, PM = since 6 am today, widened if a window is thin). Query params: `city | lat,lon`, `tz`, `edition=am|pm`, `grade`, optional `limit` (default: no limit). It refreshes every 10 minutes and slips new stories in after the current report.
-  - *Sources:* Google News (geo + search for the place, nation topics, world), PBS, NPR, ABC, CBS, NBC, Guardian, BBC (+ regions), Al Jazeera, DW, France 24, UN News; BBC Newsround for grades K-5. Kid-safety filtering follows the avatar's grade band.
-  - *Classroom sources by grade* (the `learn` tier and a Watch & learn row, in the newsroom and the phone's News app): K-5 DOGOnews articles + PBS KIDS link; 6-8 PBS NewsHour Classroom lessons + CNN 10 link; 9-12 PBS NewsHour Classroom + PBS Student Reporting Labs. CNN 10 and PBS KIDS have no usable feed, so they are links.
-  - *Video studio* (`src/news/studio.ts`): every report in the rundown is rendered to a WebM by a background queue (two at a time, real time, about 16 s each, paused while the tab is hidden) and kept in an on-device IndexedDB library with a poster frame. A video is reused while its story, edition label and `VIDEO_VERSION` are unchanged; changed or new stories are regenerated on each feed refresh, stale ones are pruned after a day (cap 80). The newsroom has a Video library panel (play, save, redo, regenerate all, pause, auto toggle); the phone's story view has Watch video (with a full-screen mode), which reuses the library or renders on demand.
-  - *Generated videos* (`src/news/video.ts`): each story becomes a short animation built from its own words: a topic scene with a field reporter, a figures shot only if the text contains numbers, a quote shot, a map with a pin for a place named in the text (`gazetteer.ts`), and a title card. **Save report as video** downloads it as WebM. Offline demo of the whole pipeline: `UNIFY_MOCK_FEEDS=1 npm start`.
-  - The rundown lists every report with tier filters and search; tap one to jump.
-- Every page also runs standalone (doorways then just show a hint).
-
-## Art style
-See `docs/ART_STYLE.md`: soft cut edges, paper-core rims, drop shadows, sheet curl, one shared kraft palette and a screen-level grain overlay on every page. `UNIFY_PAPER=0 npm run assets` regenerates the previous flat look.
-
-## Scripts
-- `npm run build` bundles the auditorium (`demo/dist/bundle.js`, Phaser included) and both hallways (`hall3d.js` with Three.js, `hall.js`); also runs on `npm install`.
-- `npm run typecheck`; `npm run assets` runs the art pipeline (needs Python 3.10+, `pip install pillow numpy`). Isometric hallway art: `tools/gen_hall.py` + `tools/layout_hall.py` (the 3D campus is laid out in `src/hall3d/campus.ts`: blocks, doors, lockers, props and the nav grid).
-- `python3 tools/bake_chibi.py` redraws the auditorium characters with the hallway's chibi rig. `python3 tools/build_artifact.py OUT_DIR` writes a relative-path copy for plain file hosts.
-- Feed env: `PORT`, `SCHOOL_CITY` (fallback city), optional `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` (anchor copy for every story, and live NPC replies to typed text via `/api/chat`; without a key the local dialogue engine answers).
-- `UNIFY_MOCK_FEEDS=1` serves built-in fixtures so the newsroom pipeline runs without internet.
-
-## Docs
-`docs/`: auditorium Bible update, pipeline README, art style, broadcast integration notes. `prototypes/newsroom-enhanced.html` is the reference newsroom. The earlier top-down `school-sim.html` / `school-sim-cartoon.html` prototypes were removed (nothing linked to them); they remain in git history: `git checkout 26c11b8 -- school-sim.html school-sim-cartoon.html`.
-
-## Known gaps
-- Newsroom anchors are drawn live in vector (same palette, shadows and grain, not the pipeline sprites).
-- The live feed could not be exercised from the build sandbox (outbound hosts blocked); it falls back to sample data.
-- Hallway NPCs do not use lockers or benches yet (they walk and stand).
-- Diagonal directions in the auditorium sheets are the front/back chibi view with the head turned, not a true three-quarter drawing.
-- Performance was only measured with software rendering; profile on a real phone.
-- `tools/gen_decor.py` / `gen_fpv.py` output (`decor`, `fpv`, `textbook`) is not used at runtime.
-
-- Netlify: `python3 tools/build_netlify.py OUT_DIR --zip` builds a deployable site (static game + the news feed as a Netlify Function at `/api/broadcast`).
-
-## Deploy on Netlify from Git
-The repo root `netlify.toml` builds from source (`npm run build`, then `tools/build_netlify.py dist`), publishes `dist/` and serves the news feed as a function at `/api/broadcast`. In Netlify: Add new project > Import from GitHub > choose this repo and branch. No settings needed; optional env vars `SCHOOL_CITY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`. New sites are public by default (team-only visitor access is a per-site setting under Site configuration > Access & security).
-
-## People, memory and conversations
-- **Avatar creator** (Avatar button; shown on first visit): body (grade band sets height, build, head size, skin), face (eye shape and colour, brows, mouth, freckles, glasses styles), 19 hair styles with colour and highlights, outfit (9 tops, patterns, bottoms, shoes), extras (hats, bag, earrings, scarf, badge), name and pronouns, with a live turn-around and walk preview. It is used for your character in the campus **and** in the auditorium (baked at runtime).
-- **56 unique NPCs** (`roster.ts`): each has a name, grade, look, personality, interests, favourite and hardest subject, food, pet, dream, quirk, secret and a best friend or rival. Looks are checked for uniqueness. Staff (hall monitor, teacher, four subject teachers) are adults.
-- **Memory** (`social.ts`, localStorage `unify.social.v1`, shared by all pages): friendship, how often you talked, topics, facts you told them (hobby, favourite food or subject, pet, mood), quiz results, lunch buddies. NPCs greet you by name, ask how your hobby is going, remember when you helped them, and friends walk up to say hi. **Friends** (F) lists everyone you met.
-- **Conversations** (tap a person or press T): choose a reply or type your own. Topics: how are you, subjects, hobbies, about me, food, gossip (grounded in the roster and other NPCs' memories), compliments on what they actually wear, jokes, studying with quiz questions by grade, advice, lunch invitations. Hallway chatter bubbles also come from the roster.
-- **Hand raising** (auditorium, H or the button): the teacher asks questions, classmates raise their hands and answer (sometimes wrongly), and you can volunteer to answer or help someone, or raise your hand to ask the teacher to explain again, give an example, say why, define a word, or answer your own typed question. Teachers remember what you asked. Tap a seated classmate to whisper.
-
-## Faculty and CarryingCareers
-
-- **Teachers (online-completable classes only):** Mr. Tanaka (math), Ms. Ayrissa (ELA), Ms. Okafor (science), Mr. O'Brien (history) and Mr. Haddad (CarryingCareers). Ms. Park (computer science), Dr. Larsen (biology) and Mrs. Raman (English literature) are on hall duty. PE, band and studio art are not added because they cannot be completed online. Data and rotation live in `src/hall3d/faculty.ts`.
-- **Daily looks:** each teacher has 5 hairstyles and 5 outfits chosen by a weekly shuffle, so nothing repeats Monday to Friday (weekends repeat Monday and Tuesday).
-- **CarryingCareers:** one classroom for every career path, any type: finding your path; building and moving things; caring, teaching and helping; safety, law and government; technology, science and engineering; business, money and sales; arts, media and hospitality; food, farms and nature; making a plan; pay, paths and choices. Together they cover all 16 career clusters. Lessons are in `src/class3d/curriculum.ts`.
-- **Spoken lessons:** `src/class3d/voice.ts` (browser speech, per-teacher voices, mute button in the classroom).
-- **Moods and gestures:** `src/class3d/persona.ts` (smile, joy, frown, upset, frustration, surprise, thinking, stern).
-- **Sizes:** adults are 1.4 world size, students 0.9 and smaller by grade (`AGE_SCALE` in `src/hall3d/characters.ts`).
-
-## Class times, lessons that open up, and the new-student assessment
-
-- **Class times board:** a corkboard on the hallway plaza (and one on each classroom's right wall) shows today's picked time and lesson number for every class. Press **B** near it or use **Class times** in the hallway or classroom menu. Each class offers 5 random session times a day, or Morning, Noon and Evening set times; the pick goes on the phone's schedule.
-- **Get ahead:** finishing a lesson opens the next one for that class (**More > Next lesson**).
-- **Life Lessons** (Dr. Larsen): 14 lessons on money, budgets, credit and scams, home care, cooking, health, feelings, safety, digital privacy, relationships and consent, time, adult paperwork, getting around, and decisions.
-- **New-student assessment** (`src/game/placement.ts`): finds age and grade band, then a level in math, ELA, science and history with adaptive questions. It then sets a starting point for **extra lessons** (`src/class3d/catchup.ts`, 24 bridge lessons for K-2, 3-5 and 6-8) that run beside regular classes: they show in each classroom's More menu and can be booked at set times in Class times. It is off for demo runs; turn on "Ask new students" in the classroom More menu, or take it any time from More or the hallway Me menu.
-- **Voices** stay the same per person: each voice choice is saved and kept distinct between teachers.
-
-## Curriculum packs, textbook and electives
-Bring in a whole curriculum with a pack (Markdown or JSON): lessons, a **script the teacher performs** (spoken lines with moods and gestures, board writing, questions, "open your textbook" cues), and a **textbook** to read in depth.
-Packs ship in `curriculum/` (listed in `curriculum/index.json`) or are imported in class under **More → Curriculum packs**. Format and examples: `curriculum/README.md`.
-In class: **More → Textbook** (chapters, search; every class also has auto-made class notes), **More → Electives** (extra courses such as the bundled high-school electives: Algebra I, Geometry, Statistics, Computer Science, Psychology, Public Speaking, Journalism, Economics, Test Prep, Applications, Study Skills).
-The class-times bulletin board: classroom **Camera → Bulletin board**, hallway **Go to → Class-times board** (or key **B**).
-
-## Class pet, daily moments, stamps, study buddy, dorm rewards, parent weekly summary
-- **Class pet** (`src/class3d/pet.ts`): a play pen in the front-left corner of the classroom. Pick a rabbit, hamster, turtle or guinea pig, name it, and feed it once a day (the chip at the bottom left). Kept on the device (`unify.pet.v1`) and synced to the family account. Feeding counts as a daily quest.
-- **Moment of the day** (`src/hall3d/daily.ts`): a short, kind announcement at morning arrival that changes every day (14 of them, never the same two days in a row).
-- **Lesson stamps** (`src/game/stamps.ts`): finishing a lesson shows "Stamp 4 of 20 in Math" with a star bar; the 5th, 10th, 20th and last stamp are milestones.
-- **Study buddy "Sparky"** (`src/game/buddy.ts`): the "Need a hint?" button in class gives a nudge, then a strategy, then points to the teacher, then teach-it-back questions. Hints only, never answers, and no AI is needed.
-- **Dorm rewards** (`src/dorm/rewards.ts`): Pet cage (feed the pet 3 times), Spirit pennant (3-day quest streak) and Champion cup (5-day streak) are listed in the dorm's Add furniture only once earned.
-- **Parent weekly summary** (`src/game/weekly.ts`, shown on `parent.html`): a short, positive "This week" note per child (class days, lessons finished, quest streak, pet, rewards). It never shows scores or compares children.
-- Seasons and weather already come from `src/game/world.ts` and `src/hall3d/weatherfx.ts`; clubs from `src/game/community.ts`.
-- Tests: `node tests/class-pet.test.mjs`, `daily-moment`, `stamps`, `buddy`, `dorm-rewards`, `weekly` (the browser ones need `SMOKE_CHROMIUM` and a build).
-- **Club Corner** (`clubs3d.html`, `src/clubs3d/ClubRoom3D.ts`, `demo/clubs3d.ts`): a 3D room with a table per club, a weekly schedule board (today highlighted, today's clubs glow) and a green check on the clubs you joined. Tap a table or use the list at the bottom to read about a club, join or leave it, and open the existing clubs and meetings screen. Reached from the Today panel's "Club Corner" button. Test: `node tests/club-room.test.mjs`.
-- **Stamp card** (Today panel, `src/hall3d/hubui.ts`): one row per subject with stars and n/total. The classroom saves the real lesson totals (`unify.lessoncounts.v1`) once the lesson packs have loaded; until then a subject just says how many lessons are finished.
-
-
----
-
-UNIFY Academy school app. Replaces the earlier Campus Quest app (still in git history). Build: see netlify.toml; Pixar edition: python3 tools/build_pixar_app.py (docs/PIXAR_APP.md).
+export function openHub(hooks: HubHooks, startTab = "Today") {
+  if (!styled) { styled = true; const s = document.createElement("style"); s.textContent = CSS; document.head.appendChild(s); }
+  root ??= E("div", "hb", document.body); const R = root; R.innerHTML = ""; R.classList.add("show"); R.onkeydown = (e) => e.stopPropagation(); R.onpointerdown = (e) => e.stopPropagation();
+  const P = E("div", "hb-p", R), H = E("div", "hb-h", P); E("h2", "", H, "⭐ Today at UNIFY"); const tabsEl = E("div", "hb-t", P), body = E("div", "hb-body", P);
+  const close = () => { R.classList.remove("show"); R.innerHTML = ""; hooks.onClose?.(); }; E("button", "hb-b", H, "Close").onclick = close; R.onclick = (e) => { if (e.target === R) close(); };
+  let tab = startTab; const TABS = ["Today", "Event", "Friends & clubs", "Collection", "Look & sound", "Grown-ups"];
+  const draw = () => { tabsEl.innerHTML = ""; body.innerHTML = ""; for (const t of TABS) { const b = E("button", "hb-b" + (t === tab ? " on" : ""), tabsEl, t); b.onclick = () => { tab = t; draw(); }; } ({ Today: today, Event: event, Collection: collection, "Look & sound": look, "Grown-ups": grownups, "Friends & clubs": communityTab } as any)[tab](body, draw, hooks); };
+  draw();
+}
+function today(b: HTMLElement, _redraw: () => void, hooks: HubHooks) {
+  const ev = eventThisWeek(), sp = Quests.spirit(), st = Quests.streak();
+  const top = E("div", "hb-card", b); E("b", "", top, Events.banner()); const row = E("div", "hb-row", top); row.style.marginTop = "6px"; E("small", "", row, describe());
+  const sc = E("div", "hb-card", b); E("b", "", sc, `Spirit Meter ${sp.pts}/${SPIRIT_GOAL}`); const bar = E("div", "hb-bar", sc); E("i", "", bar).style.width = `${Math.min(100, (sp.pts / SPIRIT_GOAL) * 100)}%`; E("small", "", sc, sp.full ? "Full! Everyone's spirit lit up Friday's show. 🎭" : "Finish quests to fill the meter this week. A full meter makes Friday Showtime extra special.");
+  E("small", "", sc, `Streak: ${st} day${st === 1 ? "" : "s"} 🔥 (a missed day just starts a fresh streak, nothing is lost)`).style.display = "block";
+  E("h3", "", b, "Today's quests");
+  for (const t of todays()) { const done = Quests.isDone(t), c = E("div", "hb-card hb-q" + (done ? " done" : ""), b); E("span", "ic", c, t.icon); const x = E("div", "", c); E("b", "", x, t.text); E("small", "", x, `${Quests.progress(t)}/${t.n}`).style.display = "block"; }
+  stampCard(b);
+  E("h3", "", b, "Jump in"); const r = E("div", "hb-row", b);
+  E("button", "hb-b go", r, "🎒 Club Corner").onclick = () => { window.open("clubs3d.html", "_blank"); };
+  if (hooks.openGames) E("button", "hb-b go", r, "🎮 Practice games").onclick = () => { hooks.openGames!(); };
+  E("button", "hb-b go", r, "📚 Curriculum app").onclick = () => { window.open("curriculum.html", "_blank"); };
+  if (hooks.openTrip) E("button", "hb-b go", r, "🥽 VR field trip").onclick = () => { hooks.openTrip!(); };
+  if (hooks.goTo) { E("button", "hb-b", r, "🚪 The Open Door").onclick = () => hooks.goTo!("open"); E("button", "hb-b", r, "🎭 Auditorium").onclick = () => hooks.goTo!("news"); }
+  void ev;
+}
+/** the stamp card: one row per subject, a star for every tenth of the lessons finished, plus the class pet's mood */
+function stampCard(b: HTMLElement) {
+  E("h3", "", b, "Your stamp card"); const card = E("div", "hb-card", b), counts = readLessonCounts(); let any = false;
+  for (const s of ALL_SUBJECTS) {
+    const n = Progress.doneCount(s), total = Math.max(counts[s] ?? 0, CURRICULUM[s]?.length ?? 0);
+    const known = !!counts[s]; if (!known && !n) continue; any = true; const row = E("div", "hb-row", card); row.style.justifyContent = "space-between"; E("b", "", row, SUBJECT_NAME[s]);
+    E("span", "", row, known ? `${stampBar(n, total)}  ${Math.min(n, total)}/${total}` : `${n} finished`).title = `${n} lesson${n === 1 ? "" : "s"} finished`;
+  }
+  if (!any) E("small", "", card, "Finish a lesson to earn your first stamp.");
+  const pet = loadPet(); if (pet) { const m = petMood(pet), r = E("div", "hb-row", card); r.style.marginTop = "6px"; E("small", "", r, `🐾 ${pet.name} is ${m === 3 ? "happy" : m === 2 ? "a little peckish" : "hungry"} ${"♥".repeat(m)}${"♡".repeat(3 - m)}. Feed it in the classroom.`); }
+}
+function choiceRow(parent: HTMLElement, label: string, opts: { id: string; label: string; color?: string; emoji?: string }[], cur: string | undefined, set: (id: string) => void) {
+  E("h3", "", parent, label); const r = E("div", "hb-row", parent); for (const o of opts) { const b = E("button", "hb-b" + (o.id === cur ? " on" : ""), r, `${o.emoji ?? ""} ${o.label}`.trim()); if (o.color) b.style.borderLeft = `8px solid ${o.color}`; b.onclick = () => set(o.id); }
+}
+function event(b: HTMLElement, redraw: () => void) {
+  const t = eventThisWeek(), d: EventDef = t.def, me = Events.mine(d.id), out = Events.optedOut(d.id);
+  const c = E("div", "hb-card", b); E("b", "", c, `${d.icon} ${d.name}`); E("div", "", c, d.blurb); E("small", "", c, t.live ? "It's on right now (Wednesday to Friday)." : `Starts in ${t.startsIn} day${t.startsIn === 1 ? "" : "s"}. You can get your look ready now.`);
+  E("div", "", b, "").style.height = "2px";
+  const sel = { team: me?.team, acc: me?.acc, role: me?.role };
+  if (d.teams) choiceRow(b, "Pick your colour or team", d.teams, sel.team, (id) => { sel.team = id; Events.adopt(d.id, sel); redraw(); });
+  if (d.accessories) choiceRow(b, "Pick an accessory (or none)", d.accessories, sel.acc, (id) => { sel.acc = id; Events.adopt(d.id, sel); redraw(); });
+  if (d.roles) choiceRow(b, "How do you want to join in?", d.roles, sel.role, (id) => { sel.role = id; Events.adopt(d.id, sel); redraw(); });
+  const r = E("div", "hb-row", b); r.style.marginTop = "10px";
+  const join = E("button", "hb-b go", r, me ? "✔ You're in (tap to update)" : "Join this event"); join.onclick = () => { Events.adopt(d.id, sel); Quests.track("event"); toast(`You joined ${d.name}!`); redraw(); };
+  const skip = E("button", "hb-b" + (out ? " on" : ""), r, out ? "Skipping this one" : "Skip this event"); skip.onclick = () => { Events.optOut(d.id); redraw(); };
+  E("small", "", b, "Events are always optional. Lessons and friends carry on as usual either way. Quiet mode (in Look & sound) turns the whole school's event outfits off.").style.display = "block";
+  E("h3", "", b, "Coming up"); const up = E("div", "hb-row", b); for (const e of EVENTS) { const x = E("span", "hb-b sm", up, `${e.icon} ${e.name}`); if (e.id === d.id) x.classList.add("on"); }
+}
+const SLOT_NAMES: Record<Slot, string> = { wall: "Locker wallpaper", light: "Locker lights", magnet: "Locker magnets (up to 6)", plate: "Locker name plate", cloth: "Chat Chow table cloth", flag: "Chat Chow flag", crew: "Chat Chow crew name" };
+function collection(b: HTMLElement, redraw: () => void) {
+  const s = Cosm.state(); E("small", "", b, `You own ${s.own.length} of ${ITEMS.length} items. Earn more from daily quests. Tap an item to use it.`).style.display = "block";
+  const name = E("div", "hb-card", b); E("b", "", name, "Your Chat Chow crew name"); const row = E("div", "hb-row", name); const inp = E("input", "", row) as HTMLInputElement; inp.type = "text"; inp.maxLength = 18; inp.value = Cosm.crewName(); const sv = E("button", "hb-b sm", row, "Save"); sv.onclick = () => { Cosm.setCrewName(inp.value); toast("Crew name saved. Sit at a Chat Chow table to see it!"); redraw(); };
+  for (const slot of Object.keys(SLOT_NAMES) as Slot[]) {
+    E("h3", "", b, SLOT_NAMES[slot]); const g = E("div", "hb-grid", b);
+    for (const it of ITEMS.filter((i) => i.slot === slot)) { const own = s.own.includes(it.id), eq = slot === "magnet" ? (s.eq.magnets ?? []).includes(it.id) : (s.eq as any)[slot] === it.id; const c = E("div", "hb-it" + (eq ? " eq" : "") + (own ? "" : " lock"), g); const a = E("span", "art", c, own ? it.art : "🔒"); if (own && it.color && it.color !== "rainbow") a.style.background = it.color; if (own && it.color === "rainbow") a.style.background = "linear-gradient(90deg,#f26b5b,#ffd23f,#7bd389,#6aa9f0,#b8a8da)"; E("div", "", c, own ? it.name : "Earn from quests"); if (own) c.onclick = () => { Cosm.equip(it.id); redraw(); }; }
+  }
+}
+function look(b: HTMLElement, redraw: () => void, hooks: HubHooks) {
+  const P = World.prefs;
+  E("h3", "", b, "Decorations"); const sel = E("select", "", b) as HTMLSelectElement; for (const [id, name] of [["auto", "Auto: follow the season and dates"], ["off", "No decorations"], ...THEMES.map((t) => [t.id, t.name])]) { const o = E("option", "", sel, name); o.value = id; if (id === P.decor) o.selected = true; } sel.onchange = () => { World.set({ decor: sel.value }); hooks.applyTheme?.(); redraw(); };
+  const th = themeOf(); if (th) E("small", "", b, `Now showing: ${th.name}. ${th.mood}.`).style.display = "block";
+  E("h3", "", b, "Weather & place"); const lbl = E("label", "", b), cb = E("input", "", lbl) as HTMLInputElement; cb.type = "checkbox"; cb.checked = P.local; E("span", "", lbl, "Match the weather and season where we live");
+  cb.onchange = async () => { if (cb.checked) { const ok = await enableLocal(); if (!ok) { cb.checked = false; toast("Couldn't get your location. The school will follow the date instead."); } } else disableLocal(); hooks.applyTheme?.(); redraw(); };
+  E("small", "", b, P.local ? `Using about (${P.lat}, ${P.lon}), rounded to roughly 11 km and kept only on this device. Weather is fetched from Open-Meteo.` : "Off. The school follows the date and your time zone. Turning this on asks your browser for your location once; only a rounded spot is saved on this device.").style.display = "block";
+  const tg = (k: "weatherFx" | "sound" | "music" | "quiet", text: string) => { const l = E("label", "", b), c = E("input", "", l) as HTMLInputElement; c.type = "checkbox"; c.checked = !!(World.prefs as any)[k]; E("span", "", l, text); c.onchange = () => { World.set({ [k]: c.checked } as any); hooks.applyTheme?.(); }; };
+  E("h3", "", b, "Buttons"); { const l = E("label", "", b), c = E("input", "", l) as HTMLInputElement; c.type = "checkbox"; try { c.checked = localStorage.getItem("unify.ui.always") === "1"; } catch { /* none */ } E("span", "", l, "Keep buttons visible (otherwise double-tap the scene to show them)"); c.onchange = () => { try { localStorage.setItem("unify.ui.always", c.checked ? "1" : "0"); } catch { /* none */ } dispatchEvent(new CustomEvent("unify:ui-pref")); }; E("small", "", b, "Buttons are small and hide themselves so the lesson, the hallway and the mood stay front and centre. Pressing Tab also shows them.").style.display = "block"; }
+  E("h3", "", b, "Sound & motion"); tg("sound", "Sounds (footsteps, bell, crowd, weather)"); tg("music", "Soft background tune"); tg("weatherFx", "Show rain, snow, leaves and petals"); tg("quiet", "Quiet mode: no event outfits or party effects");
+}
+function grownups(b: HTMLElement, redraw: () => void) {
+  if (!parentUnlocked()) { E("div", "hb-card", b, "This tab is for parents and guardians. Unlock Parent mode with your PIN on the check-in screen (or tick the grown-up box in The Open Door), then come back."); return; }
+  const s = Safety.state();
+  const c = E("div", "hb-card", b); E("b", "", c, "Time at school"); E("div", "", c, `Today: ${Safety.minutesToday()} min · Last 7 days: ${Safety.minutesWeek()} min`);
+  const r = E("div", "hb-row", c); E("span", "", r, "Daily reminder after"); const lim = E("select", "", r) as HTMLSelectElement; for (const m of [0, 20, 30, 45, 60, 90, 120]) { const o = E("option", "", lim, m ? `${m} min` : "no limit"); o.value = String(m); if (m === s.limitMin) o.selected = true; } lim.onchange = () => { Safety.setLimit(+lim.value); redraw(); };
+  const fr = E("div", "hb-card", b); E("b", "", fr, "Friends and chats"); let npc = 0, real: string[] = []; try { const m = JSON.parse(localStorage.getItem("unify.social.v1") || "{}").mem ?? {}; npc = Object.values(m).filter((x: any) => x.fr >= 20).length; const talks = JSON.parse(localStorage.getItem("unify.social.v1") || "{}").profile?.stats?.talks ?? 0; E("div", "", fr, `Buddies at school (20+ friendship): ${npc} · Conversations so far: ${talks}`); } catch { /* none */ }
+  try { const chats = JSON.parse(localStorage.getItem("flip.chats") || "{}"); real = Object.keys(chats).filter((k) => k.startsWith("u:")); } catch { /* none */ }
+  E("div", "", fr, `Real-person chats on the phone: ${real.length}`); E("small", "", fr, "Real chats follow the grade-band and family rules. Message text is not shown here; open the phone together to read it.");
+  const bl = E("div", "hb-card", b); E("b", "", bl, "Blocked handles"); if (!s.blocked.length) E("small", "", bl, "None"); for (const h of s.blocked) { const rr = E("div", "hb-row", bl); E("span", "", rr, "@" + h); E("button", "hb-b sm", rr, "Unblock").onclick = () => { Safety.unblock(h); redraw(); }; }
+  const add = E("div", "hb-row", bl); const bi = E("input", "", add) as HTMLInputElement; bi.type = "text"; bi.placeholder = "handle to block"; E("button", "hb-b sm", add, "Block").onclick = () => { if (bi.value.trim()) { Safety.block(bi.value.trim().replace(/^@/, ""), "blocked by parent"); redraw(); } };
+  const hs = E("div", "hb-card", b); E("b", "", hs, "Live-class hosts (real people teaching in The Open Door)"); const names = Object.keys(s.hosts); if (!names.length) E("small", "", hs, "None yet. When a class lists a live host, you'll approve them here before kids can join.");
+  for (const n of names) { const rr = E("div", "hb-row", hs); E("span", "", rr, `${n}: ${s.hosts[n] === "ok" ? "approved" : "not allowed"}`); E("button", "hb-b sm", rr, s.hosts[n] === "ok" ? "Revoke" : "Approve").onclick = () => { Safety.setHost(n, s.hosts[n] === "ok" ? "no" : "ok"); redraw(); }; }
+  E("small", "", b, "Real people teach as an animated avatar. Cameras are turned off for everyone: only voices and avatars are shared.").style.display = "block";
+}
